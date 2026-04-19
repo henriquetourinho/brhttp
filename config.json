@@ -1,0 +1,80 @@
+{
+  "port": 5571,
+  "serve_dir": "public",
+
+  "spa_fallback_enabled": true,
+  "dir_listing_enabled": false,
+  "gzip_enabled": true,
+
+  "custom_404_page_path": "errors/404.html",
+  "log_file_path": "brhttp.log",
+
+  "inject_js_path": "",
+  "inject_css_path": "",
+
+  "watch_debounce_ms": 150,
+  "watch_exclude_dirs": ["node_modules", ".git", "dist", ".cache"],
+
+  "https_enabled": false,
+  "https_port": 5572,
+  "https_cert_file": "",
+  "https_key_file": "",
+
+  "dashboard_enabled": true,
+
+  "api_token": "troque-por-um-token-secreto-forte",
+
+  "api_command_enabled": false,
+  "api_command_allow_list": ["npm", "git", "make"],
+
+  "notification_webhook_url": "",
+
+  "proxy_rules": [
+    {
+      "path": "/api/",
+      "target": "http://localhost:3000"
+    },
+    {
+      "path": "/auth/",
+      "target": "http://localhost:4000"
+    }
+  ],
+
+  "redirects": [
+    {
+      "from": "/docs-antigos",
+      "to": "/docs",
+      "code": 301
+    }
+  ],
+
+  "rewrites": [],
+
+  "custom_headers": [
+    {
+      "path": "/api/",
+      "headers": {
+        "X-Powered-By": "brhttp"
+      }
+    }
+  ],
+
+  "command_webhooks": [
+    {
+      "event": "server_start",
+      "command": "npm",
+      "args": ["run", "watch"]
+    },
+    {
+      "event": "file_change",
+      "path": "src/scss",
+      "command": "npm",
+      "args": ["run", "build-css"]
+    },
+    {
+      "event": "server_stop",
+      "command": "echo",
+      "args": ["brhttp encerrado em {{timestamp}}"]
+    }
+  ]
+}
