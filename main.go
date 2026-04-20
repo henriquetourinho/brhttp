@@ -1825,7 +1825,7 @@ textarea{
         <button class="btn btn-primary" onclick="saveConfig()">Salvar no Disco</button>
       </div>
       <div style="padding:0">
-		<textarea id="cfg-editor" spellcheck="false">` + string(cfgJSON) + `</textarea>
+		<textarea id="cfg-editor" spellcheck="false">` + cfgJSONEscaped + `</textarea>
       </div>
     </div>
   </div>
