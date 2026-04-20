@@ -1,0 +1,16 @@
+nohup: ignorando entrada
+
+  ██████╗ ██████╗ ██╗  ██╗████████╗████████╗██████╗ 
+  ██╔══██╗██╔══██╗██║  ██║╚══██╔══╝╚══██╔══╝██╔══██╗
+  ██████╔╝██████╔╝███████║   ██║      ██║   ██████╔╝
+  ██╔══██╗██╔══██╗██╔══██║   ██║      ██║   ██╔═══╝ 
+  ██████╔╝██║  ██║██║  ██║   ██║      ██║   ██║     
+  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝      ╚═╝   ╚═╝  v4.5.0
+
+  🚀  HTTP      → http://localhost:5571
+  🔒  HTTPS     → https://localhost:5572
+  📊  Dashboard → http://localhost:5571/___brhttp
+  📁  Servindo  → www
+  ⚡  Live Reload, Supervisor de processos: ativos
+
+2026/04/20 10:03:54   🔒  HTTPS ativo na porta :5572
