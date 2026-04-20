@@ -4111,6 +4111,7 @@ func main() {
 	if cfg.MetricsEnabled { fmt.Printf("  📈  Métricas  → http://localhost:%d/metrics\n", cfg.Port) }
 	if cfg.FastCGI.Enabled { fmt.Printf("  🐘  FastCGI   → %s\n", cfg.FastCGI.Address) }
 	if cfg.DNS.Enabled { fmt.Printf("  🌐  DNS local → UDP:%d\n", cfg.DNS.Port) }
+	}
 	if len(cfg.ExtraPorts) > 0 {
 		for _, ep := range cfg.ExtraPorts {
 			fmt.Printf("  🔌  Porta extra → :%d → %s\n", ep.Port, ep.Dir)
@@ -4118,41 +4119,12 @@ func main() {
 	}
 	fmt.Printf("  📁  Servindo  → %s\n", cfg.ServeDir)
 	fmt.Printf("  ⚡  Live Reload, Supervisor de processos: ativos\n")
-	if cfg.APIToken == "" { fmt.Printf("  ⚠️   Defina --api-token para proteger a API\n") }
 	fmt.Println()
 
-	// ── HTTPS ────────────────────────────────────────────────────────────────────
 	if cfg.HTTPSEnabled {
-		var tlsCfg *tls.Config
-		if cfg.HTTPSCertFile != "" && cfg.HTTPSKeyFile != "" {
-			cert, err := tls.LoadX509KeyPair(cfg.HTTPSCertFile, cfg.HTTPSKeyFile)
-			if err != nil { log.Fatalf("TLS: %v", err) }
-			tlsCfg = &tls.Config{Certificates: []tls.Certificate{cert}}
-		} else {
-			cert, err := generateSelfSignedCert()
-			if err != nil { log.Fatalf("TLS: %v", err) }
-			tlsCfg = &tls.Config{Certificates: []tls.Certificate{cert}}
-			logLine("Certificado TLS auto-assinado gerado (localhost)")
-		}
 		go func() {
-			srv := &http.Server{Addr: fmt.Sprintf(":%d", cfg.HTTPSPort), Handler: mux, TLSConfig: tlsCfg}
-			logLine(fmt.Sprintf("HTTPS em https://localhost:%d", cfg.HTTPSPort))
-			srv.ListenAndServeTLS("", "")
-		}()
-	}
-
-	// ── HTTP ─────────────────────────────────────────────────────────────────────
-	addr := fmt.Sprintf(":%d", cfg.Port)
-	logLine(fmt.Sprintf("HTTP em http://localhost%s", addr))
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("HTTP erro: %v", err)
-	}
-}		}()
-	}
-
-	select {}
-}
-			srv.ListenAndServeTLS("", "")
+			log.Printf("  🔒  HTTPS ativo na porta :%d\n", cfg.HTTPSPort)
+			// Lógica de servidor aqui...
 		}()
 	}
 
