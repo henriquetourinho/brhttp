@@ -1227,6 +1227,7 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Encode token em base64 para evitar problemas com caracteres especiais
 	tokenB64 := base64.StdEncoding.EncodeToString([]byte(token))
+	tokenJSON, _ := json.Marshal(tokenB64)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(`<!DOCTYPE html>
@@ -1823,7 +1824,7 @@ textarea{
 
 <script>
 // Decodificar token do base64
-var tokenB64 = '` + tokenB64 + `';
+var tokenB64 = ` + string(tokenJSON) + `;
 var TOKEN = atob(tokenB64);
 var logs = ` + string(logsJSON) + `;
 var hist = ` + string(histJSON) + ` || [];
