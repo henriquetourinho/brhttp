@@ -35,7 +35,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const Version = "4.1.0"
+const Version = "4.0.0"
 
 // ─── Tipos de configuração ────────────────────────────────────────────────────
 
@@ -1156,148 +1156,376 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>brhttp v` + Version + ` — Painel</title>
+<title>brhttp ` + Version + `</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-:root{--bg:#0d1117;--s1:#161b22;--s2:#21262d;--bd:#30363d;--t:#e6edf3;--m:#8b949e;--a:#58a6ff;--g:#3fb950;--r:#f85149;--y:#d29922;--pu:#bc8cff}
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&display=swap');
+:root{
+  --bg:#f5f5f7;
+  --surface:#ffffff;
+  --surface2:#fafafa;
+  --bd:rgba(0,0,0,.07);
+  --bd2:rgba(0,0,0,.04);
+  --t:#1d1d1f;
+  --t2:#6e6e73;
+  --t3:#aeaeb2;
+  --accent:#0071e3;
+  --accent-h:#0077ed;
+  --green:#34c759;
+  --red:#ff3b30;
+  --orange:#ff9500;
+  --purple:#af52de;
+  --sidebar-w:230px;
+  --radius:14px;
+  --radius-sm:10px;
+  --shadow:0 1px 3px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.06);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.05),0 2px 8px rgba(0,0,0,.04);
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--t);font-family:'Inter',sans-serif;font-size:13px;display:flex;min-height:100vh}
-/* Sidebar */
-.sidebar{width:220px;background:var(--s1);border-right:1px solid var(--bd);display:flex;flex-direction:column;position:fixed;top:0;left:0;height:100vh;z-index:100}
-.sidebar-logo{padding:18px 16px 14px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:10px}
-.sidebar-logo .dot{width:10px;height:10px;border-radius:50%;background:var(--g);box-shadow:0 0 8px var(--g);animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.sidebar-logo span{font-weight:700;font-size:.95rem;color:var(--a)}
-.sidebar-logo small{color:var(--m);font-size:10px;margin-left:auto}
-.nav{flex:1;overflow-y:auto;padding:8px 0}
-.nav-item{display:flex;align-items:center;gap:10px;padding:9px 16px;cursor:pointer;border-radius:0;color:var(--m);font-size:12.5px;font-weight:500;transition:.15s;border-left:3px solid transparent}
-.nav-item:hover{background:var(--s2);color:var(--t)}
-.nav-item.active{background:rgba(88,166,255,.1);color:var(--a);border-left-color:var(--a)}
-.nav-item .ico{font-size:15px;width:18px;text-align:center}
-.sidebar-footer{padding:12px 16px;border-top:1px solid var(--bd);font-size:11px;color:var(--m)}
-/* Main */
-.main{margin-left:220px;flex:1;display:flex;flex-direction:column;min-height:100vh}
-.topbar{background:var(--s1);border-bottom:1px solid var(--bd);padding:10px 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:50}
-.topbar h2{font-size:.95rem;font-weight:600;color:var(--t)}
-.topbar .sep{color:var(--bd)}
-.topbar .srv-link{color:var(--a);font-size:12px;text-decoration:none}
-.topbar .srv-link:hover{text-decoration:underline}
-.page{flex:1;padding:20px;display:none}
+html{-webkit-font-smoothing:antialiased}
+body{background:var(--bg);color:var(--t);font-family:'DM Sans',sans-serif;font-size:13.5px;display:flex;min-height:100vh;line-height:1.5}
+
+/* ── Sidebar ── */
+.sidebar{
+  width:var(--sidebar-w);
+  background:rgba(255,255,255,.82);
+  backdrop-filter:blur(20px) saturate(180%);
+  -webkit-backdrop-filter:blur(20px) saturate(180%);
+  border-right:1px solid var(--bd);
+  display:flex;flex-direction:column;
+  position:fixed;top:0;left:0;height:100vh;z-index:100;
+}
+.sidebar-logo{
+  padding:22px 18px 16px;
+  display:flex;align-items:center;gap:10px;
+}
+.logo-mark{
+  width:28px;height:28px;border-radius:8px;
+  background:var(--t);
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;
+}
+.logo-mark svg{width:16px;height:16px;fill:#fff}
+.logo-text{font-size:.85rem;font-weight:600;color:var(--t);letter-spacing:-.01em}
+.logo-ver{font-size:.7rem;color:var(--t3);font-weight:400;margin-left:auto;background:var(--bg);padding:2px 7px;border-radius:20px;border:1px solid var(--bd)}
+.nav{flex:1;overflow-y:auto;padding:4px 10px 10px}
+.nav-section{font-size:.65rem;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;padding:14px 8px 5px}
+.nav-item{
+  display:flex;align-items:center;gap:9px;
+  padding:8px 10px;cursor:pointer;
+  border-radius:9px;
+  color:var(--t2);font-size:.82rem;font-weight:500;
+  transition:background .12s,color .12s;
+  margin-bottom:1px;
+}
+.nav-item:hover{background:rgba(0,0,0,.05);color:var(--t)}
+.nav-item.active{background:var(--accent);color:#fff}
+.nav-item.active .nav-ico{opacity:1}
+.nav-ico{width:18px;height:18px;opacity:.6;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.nav-item.active .nav-ico{opacity:1}
+.sidebar-footer{
+  padding:12px 18px 16px;
+  border-top:1px solid var(--bd);
+  display:flex;align-items:center;justify-content:space-between;
+}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 2px rgba(52,199,89,.2);display:inline-block;margin-right:5px}
+.footer-link{font-size:.72rem;color:var(--t3);text-decoration:none;transition:color .15s}
+.footer-link:hover{color:var(--accent)}
+
+/* ── Main ── */
+.main{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;min-height:100vh}
+.topbar{
+  background:rgba(245,245,247,.9);
+  backdrop-filter:blur(20px);
+  -webkit-backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--bd);
+  padding:0 28px;height:52px;
+  display:flex;align-items:center;gap:14px;
+  position:sticky;top:0;z-index:50;
+}
+.topbar-title{font-size:.9rem;font-weight:600;color:var(--t);letter-spacing:-.01em}
+.topbar-sep{color:var(--bd2);font-size:1.2rem;user-select:none}
+.topbar-sub{font-size:.78rem;color:var(--t3)}
+.topbar-link{font-size:.78rem;color:var(--accent);text-decoration:none;font-weight:500}
+.topbar-link:hover{text-decoration:underline}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+
+.page{flex:1;padding:28px;display:none;animation:fadeUp .25s ease}
 .page.active{display:block}
-/* Cards */
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
-.card{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:16px;position:relative;overflow:hidden}
-.card::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(88,166,255,.04),transparent);pointer-events:none}
-.card .lbl{font-size:10px;color:var(--m);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
-.card .val{font-size:1.8rem;font-weight:700;line-height:1}
-.card .sub{font-size:10px;color:var(--m);margin-top:5px}
-.card .ico-bg{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:2.2rem;opacity:.12}
-/* Chart */
-.chart-wrap{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:20px}
-.chart-wrap h3{font-size:11px;color:var(--m);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
-canvas{width:100%!important;height:140px!important}
-/* Tables */
-.section-box{background:var(--s1);border:1px solid var(--bd);border-radius:10px;margin-bottom:16px;overflow:hidden}
-.section-box .sec-head{padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between}
-.section-box .sec-head h3{font-size:12px;font-weight:600;color:var(--t)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── Cards ── */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:22px}
+.card{
+  background:var(--surface);
+  border:1px solid var(--bd);
+  border-radius:var(--radius);
+  padding:20px 20px 16px;
+  box-shadow:var(--shadow-sm);
+  transition:box-shadow .2s,transform .2s;
+  cursor:default;
+}
+.card:hover{box-shadow:var(--shadow);transform:translateY(-1px)}
+.card-icon{font-size:1.35rem;margin-bottom:12px;display:block}
+.card-lbl{font-size:.68rem;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.09em;margin-bottom:5px}
+.card-val{font-size:1.75rem;font-weight:300;letter-spacing:-.03em;color:var(--t);line-height:1}
+.card-sub{font-size:.72rem;color:var(--t3);margin-top:6px}
+.card-val.green{color:var(--green)}
+.card-val.red{color:var(--red)}
+.card-val.purple{color:var(--purple)}
+
+/* ── Chart ── */
+.chart-wrap{
+  background:var(--surface);border:1px solid var(--bd);
+  border-radius:var(--radius);padding:20px 20px 14px;
+  margin-bottom:22px;box-shadow:var(--shadow-sm);
+}
+.chart-label{font-size:.7rem;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.09em;margin-bottom:14px}
+canvas{width:100%!important;height:110px!important}
+
+/* ── Section boxes ── */
+.section-box{
+  background:var(--surface);border:1px solid var(--bd);
+  border-radius:var(--radius);margin-bottom:16px;
+  overflow:hidden;box-shadow:var(--shadow-sm);
+}
+.sec-head{
+  padding:14px 20px;border-bottom:1px solid var(--bd2);
+  display:flex;align-items:center;justify-content:space-between;
+}
+.sec-head h3{font-size:.82rem;font-weight:600;color:var(--t);letter-spacing:-.01em}
 .section-body{padding:0}
 table{width:100%;border-collapse:collapse}
-th{text-align:left;color:var(--m);font-weight:500;padding:8px 14px;border-bottom:1px solid var(--bd);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
-td{padding:9px 14px;border-bottom:1px solid var(--s2);font-size:12px}
+th{
+  text-align:left;color:var(--t3);font-weight:500;
+  padding:9px 20px;border-bottom:1px solid var(--bd2);
+  font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;
+  background:var(--surface2);
+}
+td{padding:11px 20px;border-bottom:1px solid var(--bd2);font-size:.82rem;color:var(--t)}
 tr:last-child td{border-bottom:none}
-tr:hover td{background:rgba(255,255,255,.02)}
-/* Badges */
-.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
-.badge-green{background:rgba(63,185,80,.15);color:var(--g);border:1px solid rgba(63,185,80,.3)}
-.badge-red{background:rgba(248,81,73,.15);color:var(--r);border:1px solid rgba(248,81,73,.3)}
-.badge-blue{background:rgba(88,166,255,.15);color:var(--a);border:1px solid rgba(88,166,255,.3)}
-/* Toggle pills */
-.toggle-grid{display:flex;flex-wrap:wrap;gap:8px;padding:16px}
-.toggle-pill{display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--bd);border-radius:8px;cursor:pointer;transition:.2s;background:var(--s2)}
-.toggle-pill:hover{border-color:var(--a)}
-.toggle-pill.on{border-color:rgba(63,185,80,.4);background:rgba(63,185,80,.07)}
-.toggle-pill .tname{font-size:12px;font-weight:500}
-.switch{width:34px;height:18px;border-radius:9px;background:var(--bd);position:relative;transition:.2s;cursor:pointer;flex-shrink:0}
-.switch::after{content:'';position:absolute;width:12px;height:12px;background:#fff;border-radius:50%;top:3px;left:3px;transition:.2s}
-.toggle-pill.on .switch{background:var(--g)}
-.toggle-pill.on .switch::after{left:19px}
-/* Buttons */
-.btn{background:transparent;border:1px solid var(--a);color:var(--a);border-radius:6px;padding:6px 12px;font-size:11px;font-weight:500;cursor:pointer;transition:.15s;font-family:inherit}
-.btn:hover{background:var(--a);color:#000}
-.btn-g{border-color:var(--g);color:var(--g)}.btn-g:hover{background:var(--g);color:#000}
-.btn-r{border-color:var(--r);color:var(--r)}.btn-r:hover{background:var(--r);color:#fff}
-.btn-sm{padding:3px 8px;font-size:10px}
-/* Forms */
-.form-row{display:flex;gap:8px;align-items:center;padding:12px 14px;border-top:1px solid var(--bd);flex-wrap:wrap}
-input[type=text],input[type=password],input[type=number],select,textarea{background:var(--s2);border:1px solid var(--bd);color:var(--t);padding:7px 10px;border-radius:6px;font-size:12px;font-family:inherit;outline:none;transition:.15s}
-input[type=text]:focus,input[type=number]:focus,select:focus,textarea:focus{border-color:var(--a)}
+tr:hover td{background:rgba(0,0,0,.015)}
+
+/* ── Badges ── */
+.badge{
+  display:inline-flex;align-items:center;
+  padding:2px 9px;border-radius:20px;
+  font-size:.65rem;font-weight:600;letter-spacing:.04em;
+}
+.badge-green{background:rgba(52,199,89,.1);color:var(--green)}
+.badge-red{background:rgba(255,59,48,.1);color:var(--red)}
+.badge-blue{background:rgba(0,113,227,.1);color:var(--accent)}
+.badge-gray{background:rgba(0,0,0,.06);color:var(--t2)}
+
+/* ── Toggles / Módulos ── */
+.toggle-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;padding:18px}
+.toggle-pill{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:13px 16px;border:1px solid var(--bd);
+  border-radius:var(--radius-sm);cursor:pointer;
+  transition:border-color .15s,background .15s;
+  background:var(--surface2);
+}
+.toggle-pill:hover{border-color:rgba(0,0,0,.14)}
+.toggle-pill.on{border-color:rgba(52,199,89,.35);background:rgba(52,199,89,.04)}
+.tname{font-size:.8rem;font-weight:500;color:var(--t)}
+.switch{
+  width:38px;height:22px;border-radius:11px;
+  background:#d1d1d6;position:relative;
+  transition:background .2s;cursor:pointer;flex-shrink:0;
+}
+.switch::after{
+  content:'';position:absolute;
+  width:18px;height:18px;background:#fff;border-radius:50%;
+  top:2px;left:2px;transition:left .2s;
+  box-shadow:0 1px 3px rgba(0,0,0,.2);
+}
+.toggle-pill.on .switch{background:var(--green)}
+.toggle-pill.on .switch::after{left:18px}
+
+/* ── Buttons ── */
+.btn{
+  background:var(--surface);border:1px solid var(--bd);
+  color:var(--t);border-radius:8px;padding:7px 14px;
+  font-size:.78rem;font-weight:500;cursor:pointer;
+  transition:all .15s;font-family:inherit;
+  box-shadow:0 1px 2px rgba(0,0,0,.05);
+}
+.btn:hover{background:var(--bg);border-color:rgba(0,0,0,.14);box-shadow:var(--shadow-sm)}
+.btn:active{transform:scale(.98)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 2px 8px rgba(0,113,227,.25)}
+.btn-primary:hover{background:var(--accent-h);border-color:var(--accent-h)}
+.btn-danger{background:#fff;border-color:rgba(255,59,48,.3);color:var(--red)}
+.btn-danger:hover{background:rgba(255,59,48,.06)}
+.btn-sm{padding:4px 10px;font-size:.72rem;border-radius:6px}
+
+/* ── Forms ── */
+.form-row{
+  display:flex;gap:8px;align-items:center;
+  padding:14px 20px;border-top:1px solid var(--bd2);flex-wrap:wrap;
+  background:var(--surface2);
+}
+input[type=text],input[type=password],input[type=number],select,textarea{
+  background:#fff;border:1px solid var(--bd);
+  color:var(--t);padding:7px 11px;
+  border-radius:8px;font-size:.8rem;
+  font-family:inherit;outline:none;transition:border-color .15s,box-shadow .15s;
+}
+input:focus,select:focus,textarea:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 3px rgba(0,113,227,.12);
+}
 input[type=text]{min-width:120px}
-textarea{width:100%;min-height:380px;font-family:'Courier New',monospace;font-size:12px;resize:vertical;line-height:1.5}
-/* Log box */
-.log-box{background:#0a0e14;border-radius:0 0 10px 10px;padding:10px;height:380px;overflow-y:auto;font-size:11px;line-height:1.6;font-family:'Courier New',monospace}
-.log-line{color:var(--m);padding:1px 0;border-bottom:1px solid #1a1f27}
-.log-line.err{color:var(--r)}
-.log-line.ok{color:var(--g)}
-/* Toast */
-#toast-container{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:9999}
-.toast{background:var(--s1);border:1px solid var(--bd);border-radius:8px;padding:10px 16px;font-size:12px;box-shadow:0 4px 20px #0008;display:flex;align-items:center;gap:8px;animation:slideIn .3s ease;max-width:280px}
-.toast.ok{border-left:3px solid var(--g)}
-.toast.err{border-left:3px solid var(--r)}
-@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
-/* Responsive */
-@media(max-width:700px){.sidebar{width:60px}.sidebar-logo span,.sidebar-logo small,.nav-item span{display:none}.main{margin-left:60px}}
+textarea{
+  width:100%;min-height:380px;
+  font-family:'DM Mono',monospace;font-size:.78rem;
+  resize:vertical;line-height:1.6;
+  background:#fff;
+}
+
+/* ── Log box ── */
+.log-box{
+  background:#f9f9fb;border-radius:0 0 var(--radius) var(--radius);
+  padding:12px 16px;height:380px;overflow-y:auto;
+  font-size:.75rem;line-height:1.7;
+  font-family:'DM Mono',monospace;
+}
+.log-line{color:var(--t2);padding:1px 0;border-bottom:1px solid rgba(0,0,0,.03)}
+.log-line.err{color:var(--red)}
+.log-line.ok{color:var(--green)}
+
+/* ── Toast ── */
+#toast-container{position:fixed;bottom:22px;right:22px;display:flex;flex-direction:column;gap:8px;z-index:9999}
+.toast{
+  background:rgba(255,255,255,.95);
+  backdrop-filter:blur(20px);
+  border:1px solid var(--bd);border-radius:12px;
+  padding:11px 16px;font-size:.78rem;
+  box-shadow:0 8px 30px rgba(0,0,0,.12);
+  display:flex;align-items:center;gap:9px;
+  animation:slideIn .3s cubic-bezier(.34,1.56,.64,1);max-width:300px;
+  color:var(--t);
+}
+.toast.ok::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0}
+.toast.err::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--red);flex-shrink:0}
+@keyframes slideIn{from{transform:translateX(110%) scale(.9);opacity:0}to{transform:translateX(0) scale(1);opacity:1}}
+
+/* ── Action buttons row ── */
+.action-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+
+/* ── Responsive ── */
+@media(max-width:768px){
+  .sidebar{width:64px}
+  .logo-text,.logo-ver,.nav-section,.nav-item span,.sidebar-footer .footer-link:not(:first-child){display:none}
+  .main{margin-left:64px}
+  .page{padding:16px}
+  .cards{grid-template-columns:1fr 1fr}
+}
 </style>
 </head>
 <body>
 
 <div class="sidebar">
   <div class="sidebar-logo">
-    <div class="dot"></div>
-    <span>brhttp</span>
-    <small>v` + Version + `</small>
+    <div class="logo-mark">
+      <svg viewBox="0 0 16 16"><path d="M2 4h12v1.5H2zM2 7.25h8v1.5H2zM2 10.5h10v1.5H2z"/></svg>
+    </div>
+    <span class="logo-text">brhttp</span>
+    <span class="logo-ver">v` + Version + `</span>
   </div>
   <nav class="nav">
-    <div class="nav-item active" onclick="showTab('dashboard')" id="nav-dashboard"><span class="ico">📊</span><span>Dashboard</span></div>
-    <div class="nav-item" onclick="showTab('vhosts')" id="nav-vhosts"><span class="ico">🌐</span><span>Virtual Hosts</span></div>
-    <div class="nav-item" onclick="showTab('proxy')" id="nav-proxy"><span class="ico">🔀</span><span>Proxy Rules</span></div>
-    <div class="nav-item" onclick="showTab('redirects')" id="nav-redirects"><span class="ico">↩️</span><span>Redirects</span></div>
-    <div class="nav-item" onclick="showTab('mocks')" id="nav-mocks"><span class="ico">🧪</span><span>Mock Routes</span></div>
-    <div class="nav-item" onclick="showTab('processes')" id="nav-processes"><span class="ico">⚙️</span><span>Processos</span></div>
-    <div class="nav-item" onclick="showTab('dns')" id="nav-dns"><span class="ico">🌍</span><span>DNS &amp; Hosts</span></div>
-    <div class="nav-item" onclick="showTab('modules')" id="nav-modules"><span class="ico">🔌</span><span>Módulos</span></div>
-    <div class="nav-item" onclick="showTab('logs')" id="nav-logs"><span class="ico">📋</span><span>Logs</span></div>
-    <div class="nav-item" onclick="showTab('config')" id="nav-config"><span class="ico">🗂️</span><span>Config JSON</span></div>
+    <div class="nav-section">Visão Geral</div>
+    <div class="nav-item active" onclick="showTab('dashboard')" id="nav-dashboard">
+      <span class="nav-ico">⬡</span><span>Dashboard</span>
+    </div>
+    <div class="nav-section">Roteamento</div>
+    <div class="nav-item" onclick="showTab('vhosts')" id="nav-vhosts">
+      <span class="nav-ico">◈</span><span>Virtual Hosts</span>
+    </div>
+    <div class="nav-item" onclick="showTab('proxy')" id="nav-proxy">
+      <span class="nav-ico">⇄</span><span>Proxy Rules</span>
+    </div>
+    <div class="nav-item" onclick="showTab('redirects')" id="nav-redirects">
+      <span class="nav-ico">↪</span><span>Redirects</span>
+    </div>
+    <div class="nav-item" onclick="showTab('mocks')" id="nav-mocks">
+      <span class="nav-ico">◎</span><span>Mock Routes</span>
+    </div>
+    <div class="nav-section">Sistema</div>
+    <div class="nav-item" onclick="showTab('processes')" id="nav-processes">
+      <span class="nav-ico">◉</span><span>Processos</span>
+    </div>
+    <div class="nav-item" onclick="showTab('dns')" id="nav-dns">
+      <span class="nav-ico">◬</span><span>DNS &amp; Hosts</span>
+    </div>
+    <div class="nav-item" onclick="showTab('modules')" id="nav-modules">
+      <span class="nav-ico">⊞</span><span>Módulos</span>
+    </div>
+    <div class="nav-section">Ferramentas</div>
+    <div class="nav-item" onclick="showTab('logs')" id="nav-logs">
+      <span class="nav-ico">≡</span><span>Logs</span>
+    </div>
+    <div class="nav-item" onclick="showTab('config')" id="nav-config">
+      <span class="nav-ico">⊙</span><span>Config JSON</span>
+    </div>
   </nav>
   <div class="sidebar-footer">
-    <a href="http://localhost:` + strconv.Itoa(cfg.Port) + `" target="_blank" style="color:var(--a);text-decoration:none">:` + strconv.Itoa(cfg.Port) + ` ↗</a>
-    &nbsp;·&nbsp; <a href="/___brhttp/logout" style="color:var(--m);text-decoration:none">Sair</a>
+    <span><span class="status-dot"></span><span class="footer-link">Online</span></span>
+    <a href="/___brhttp/logout" class="footer-link">Sair</a>
   </div>
 </div>
 
 <div class="main">
   <div class="topbar">
-    <h2 id="page-title">Dashboard</h2>
-    <span class="sep">·</span>
-    <a class="srv-link" href="http://localhost:` + strconv.Itoa(cfg.Port) + `" target="_blank">localhost:` + strconv.Itoa(cfg.Port) + `</a>
+    <span class="topbar-title" id="page-title">Dashboard</span>
+    <span class="topbar-sep">/</span>
+    <a class="topbar-link" href="http://localhost:` + strconv.Itoa(cfg.Port) + `" target="_blank">localhost:` + strconv.Itoa(cfg.Port) + `</a>
+    <div class="topbar-right">
+      <span class="topbar-sub" id="topbar-uptime">` + uptime + `</span>
+    </div>
   </div>
 
   <!-- ── DASHBOARD ── -->
   <div class="page active" id="page-dashboard">
     <div class="cards">
-      <div class="card"><div class="lbl">Status</div><div class="val" style="font-size:1.1rem;color:var(--g)">● Online</div><div class="sub" id="card-up">` + uptime + `</div><div class="ico-bg">🚀</div></div>
-      <div class="card"><div class="lbl">Requisições</div><div class="val" id="card-req">` + strconv.FormatInt(reqs, 10) + `</div><div class="sub">total</div><div class="ico-bg">📥</div></div>
-      <div class="card"><div class="lbl">Erros 4xx/5xx</div><div class="val" id="card-err" style="color:var(--r)">` + strconv.FormatInt(errs, 10) + `</div><div class="sub">total</div><div class="ico-bg">⚠️</div></div>
-      <div class="card"><div class="lbl">Transferido</div><div class="val" id="card-bytes" style="font-size:1.1rem;color:var(--pu)">` + fmtBytes(byt) + `</div><div class="sub">total</div><div class="ico-bg">💾</div></div>
-      <div class="card"><div class="lbl">WebSocket</div><div class="val" id="card-ws">` + strconv.Itoa(cc) + `</div><div class="sub">clientes</div><div class="ico-bg">🔌</div></div>
+      <div class="card">
+        <span class="card-icon">🟢</span>
+        <div class="card-lbl">Status</div>
+        <div class="card-val green" style="font-size:1.1rem;font-weight:500">Online</div>
+        <div class="card-sub" id="card-up">` + uptime + `</div>
+      </div>
+      <div class="card">
+        <span class="card-icon">↓</span>
+        <div class="card-lbl">Requisições</div>
+        <div class="card-val" id="card-req">` + strconv.FormatInt(reqs, 10) + `</div>
+        <div class="card-sub">total</div>
+      </div>
+      <div class="card">
+        <span class="card-icon">⚠</span>
+        <div class="card-lbl">Erros 4xx/5xx</div>
+        <div class="card-val red" id="card-err">` + strconv.FormatInt(errs, 10) + `</div>
+        <div class="card-sub">total</div>
+      </div>
+      <div class="card">
+        <span class="card-icon">↑↓</span>
+        <div class="card-lbl">Transferido</div>
+        <div class="card-val purple" id="card-bytes" style="font-size:1.2rem;font-weight:400">` + fmtBytes(byt) + `</div>
+        <div class="card-sub">total</div>
+      </div>
+      <div class="card">
+        <span class="card-icon">⌁</span>
+        <div class="card-lbl">WebSocket</div>
+        <div class="card-val" id="card-ws">` + strconv.Itoa(cc) + `</div>
+        <div class="card-sub">clientes</div>
+      </div>
     </div>
     <div class="chart-wrap">
-      <h3>Requisições por intervalo (5s)</h3>
+      <div class="chart-label">Requisições por intervalo · 5s</div>
       <canvas id="chart-req"></canvas>
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn" onclick="api('reload','POST').then(function(){toast('Live reload disparado','ok')})">⚡ Live Reload</button>
-      <button class="btn" onclick="api('reload-config','POST').then(function(){toast('Config recarregada','ok')})">🔄 Recarregar Config</button>
-      <a href="/metrics" target="_blank"><button class="btn">📈 Métricas Prometheus</button></a>
+    <div class="action-row">
+      <button class="btn" onclick="api('reload','POST').then(function(){toast('Live reload disparado')})">Live Reload</button>
+      <button class="btn" onclick="api('reload-config','POST').then(function(){toast('Config recarregada')})">Recarregar Config</button>
+      <a href="/metrics" target="_blank"><button class="btn">Métricas Prometheus</button></a>
     </div>
   </div>
 
@@ -1312,8 +1540,8 @@ textarea{width:100%;min-height:380px;font-family:'Courier New',monospace;font-si
           <input type="text" id="vh-host" placeholder="meusite.local" style="flex:2">
           <input type="text" id="vh-dir" placeholder="./www" style="flex:2">
           <select id="vh-runtime"><option value="static">static</option><option value="php">php</option><option value="node">node</option><option value="python">python</option></select>
-          <label style="font-size:11px;color:var(--m);display:flex;align-items:center;gap:4px"><input type="checkbox" id="vh-spa"> SPA</label>
-          <button class="btn btn-g" onclick="addVHost()">+ Adicionar</button>
+          <label style="font-size:.78rem;color:var(--t2);display:flex;align-items:center;gap:5px"><input type="checkbox" id="vh-spa"> SPA</label>
+          <button class="btn btn-primary" onclick="addVHost()">Adicionar</button>
         </div>
       </div>
     </div>
@@ -1329,8 +1557,8 @@ textarea{width:100%;min-height:380px;font-family:'Courier New',monospace;font-si
         <div class="form-row">
           <input type="text" id="px-path" placeholder="/api/" style="flex:1">
           <input type="text" id="px-target" placeholder="http://localhost:3000" style="flex:2">
-          <label style="font-size:11px;color:var(--m);display:flex;align-items:center;gap:4px"><input type="checkbox" id="px-ws"> WS</label>
-          <button class="btn btn-g" onclick="addProxy()">+ Adicionar</button>
+          <label style="font-size:.78rem;color:var(--t2);display:flex;align-items:center;gap:5px"><input type="checkbox" id="px-ws"> WS</label>
+          <button class="btn btn-primary" onclick="addProxy()">Adicionar</button>
         </div>
       </div>
     </div>
@@ -1347,7 +1575,7 @@ textarea{width:100%;min-height:380px;font-family:'Courier New',monospace;font-si
           <input type="text" id="rd-from" placeholder="/old" style="flex:1">
           <input type="text" id="rd-to" placeholder="/new" style="flex:1">
           <input type="number" id="rd-code" placeholder="301" style="width:70px" value="301">
-          <button class="btn btn-g" onclick="addRedirect()">+ Adicionar</button>
+          <button class="btn btn-primary" onclick="addRedirect()">Adicionar</button>
         </div>
       </div>
     </div>
@@ -1359,7 +1587,7 @@ textarea{width:100%;min-height:380px;font-family:'Courier New',monospace;font-si
         <div class="form-row">
           <input type="text" id="rw-from" placeholder="/antigo" style="flex:1">
           <input type="text" id="rw-to" placeholder="/novo" style="flex:1">
-          <button class="btn btn-g" onclick="addRewrite()">+ Adicionar</button>
+          <button class="btn btn-primary" onclick="addRewrite()">Adicionar</button>
         </div>
       </div>
     </div>
@@ -1377,7 +1605,7 @@ textarea{width:100%;min-height:380px;font-family:'Courier New',monospace;font-si
           <select id="mk-method"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select>
           <input type="number" id="mk-code" placeholder="200" style="width:70px" value="200">
           <input type="text" id="mk-body" placeholder='{"ok":true}' style="flex:2">
-          <button class="btn btn-g" onclick="addMock()">+ Adicionar</button>
+          <button class="btn btn-primary" onclick="addMock()">Adicionar</button>
         </div>
       </div>
     </div>
@@ -1388,7 +1616,7 @@ textarea{width:100%;min-height:380px;font-family:'Courier New',monospace;font-si
     <div class="section-box">
       <div class="sec-head">
         <h3>Processos Gerenciados</h3>
-        <button class="btn btn-sm btn-g" onclick="autoDetect()">🔍 Auto-detectar</button>
+        <button class="btn btn-sm" onclick="autoDetect()">Auto-detectar</button>
       </div>
       <div class="section-body">
         <table><thead><tr><th>Nome</th><th>Estado</th><th>PID</th><th>Porta</th><th>Uptime</th><th>Ações</th></tr></thead>
@@ -1407,7 +1635,7 @@ textarea{width:100%;min-height:380px;font-family:'Courier New',monospace;font-si
         <div class="form-row">
           <input type="text" id="h-domain" placeholder="meusite.local" style="flex:2">
           <input type="text" id="h-ip" placeholder="127.0.0.1" style="flex:1">
-          <button class="btn btn-g" onclick="addHost()">+ Adicionar</button>
+          <button class="btn btn-primary" onclick="addHost()">Adicionar</button>
         </div>
       </div>
     </div>
@@ -1416,9 +1644,8 @@ textarea{width:100%;min-height:380px;font-family:'Courier New',monospace;font-si
   <!-- ── MÓDULOS ── -->
   <div class="page" id="page-modules">
     <div class="section-box">
-      <div class="sec-head"><h3>Módulos — clique para ligar/desligar (sem reiniciar)</h3></div>
-      <div class="toggle-grid" id="toggle-grid">
-      </div>
+      <div class="sec-head"><h3>Módulos — ative ou desative sem reiniciar</h3></div>
+      <div class="toggle-grid" id="toggle-grid"></div>
     </div>
   </div>
 
@@ -1428,9 +1655,9 @@ textarea{width:100%;min-height:380px;font-family:'Courier New',monospace;font-si
       <div class="sec-head">
         <h3>Log em Tempo Real</h3>
         <div style="display:flex;gap:6px;align-items:center">
-          <input type="text" id="log-filter" placeholder="Filtrar..." style="width:140px" oninput="renderLogs()">
+          <input type="text" id="log-filter" placeholder="Filtrar..." style="width:160px" oninput="renderLogs()">
           <button class="btn btn-sm" onclick="clearLogs()">Limpar</button>
-          <a href="/___brhttp/logs/download"><button class="btn btn-sm">⬇ Download</button></a>
+          <a href="/___brhttp/logs/download"><button class="btn btn-sm">Download</button></a>
         </div>
       </div>
       <div class="log-box" id="logbox"></div>
@@ -1442,7 +1669,7 @@ textarea{width:100%;min-height:380px;font-family:'Courier New',monospace;font-si
     <div class="section-box">
       <div class="sec-head">
         <h3>config.json — Editor</h3>
-        <button class="btn btn-g" onclick="saveConfig()">💾 Salvar no Disco</button>
+        <button class="btn btn-primary" onclick="saveConfig()">Salvar no Disco</button>
       </div>
       <div style="padding:0">
         <textarea id="cfg-editor" spellcheck="false">` + string(cfgJSON) + `</textarea>
@@ -1474,9 +1701,9 @@ function toast(msg, type) {
   var c = document.getElementById('toast-container');
   var t = document.createElement('div');
   t.className = 'toast '+(type||'ok');
-  t.innerHTML = (type==='err'?'❌':'✅') + ' ' + msg;
+  t.textContent = msg;
   c.appendChild(t);
-  setTimeout(function(){t.remove()},3500);
+  setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(110%)';setTimeout(function(){t.remove()},300)},3000);
 }
 
 // ── Tab navigation ──
@@ -1572,8 +1799,8 @@ function drawChart(h){
     ctx.fillStyle=color+'22';
     ctx.fill();
   }
-  drawLine(reqs,'#58a6ff',maxR);
-  drawLine(errs,'#f85149',Math.max.apply(null,errs)||1);
+  drawLine(reqs,'#0071e3',maxR);
+  drawLine(errs,'#ff3b30',Math.max.apply(null,errs)||1);
 }
 if(hist&&hist.length) drawChart(hist);
 
@@ -1582,10 +1809,10 @@ function loadVHosts(){
   apiGet('virtual-hosts/list').then(function(r){return r.json()}).then(function(d){
     var t=document.getElementById('vhosts-body');
     t.innerHTML=(d&&d.length)?d.map(function(v){
-      return '<tr><td>'+esc(v.host)+'</td><td>'+esc(v.serve_dir)+'</td><td><span class="badge badge-blue">'+esc(v.runtime||'static')+'</span></td>'
-        +'<td>'+(v.spa_fallback?'<span class="badge badge-green">SIM</span>':'—')+'</td>'
-        +'<td><button class="btn btn-r btn-sm" onclick="delVHost(\''+esc(v.host)+'\')">Remover</button></td></tr>';
-    }).join(''):'<tr><td colspan="5" style="color:var(--m);text-align:center">Nenhum virtual host</td></tr>';
+      return '<tr><td>'+esc(v.host)+'</td><td style="color:var(--t2)">'+esc(v.serve_dir)+'</td><td><span class="badge badge-gray">'+esc(v.runtime||'static')+'</span></td>'
+        +'<td>'+(v.spa_fallback?'<span class="badge badge-green">SPA</span>':'<span style="color:var(--t3)">—</span>')+'</td>'
+        +'<td><button class="btn btn-danger btn-sm" onclick="delVHost(\''+esc(v.host)+'\')">Remover</button></td></tr>';
+    }).join(''):'<tr><td colspan="5" style="color:var(--t3);text-align:center;padding:24px">Nenhum virtual host</td></tr>';
   });
 }
 function addVHost(){
@@ -1608,10 +1835,10 @@ function loadProxy(){
     var t=document.getElementById('proxy-body');
     var rules=d.proxy_rules||[];
     t.innerHTML=rules.length?rules.map(function(p){
-      return '<tr><td>'+esc(p.path)+'</td><td>'+esc(p.target)+'</td>'
-        +'<td>'+(p.websocket_enabled?'<span class="badge badge-blue">WS</span>':'—')+'</td>'
-        +'<td><button class="btn btn-r btn-sm" onclick="delProxy(\''+esc(p.path)+'\')">Remover</button></td></tr>';
-    }).join(''):'<tr><td colspan="4" style="color:var(--m);text-align:center">Nenhuma regra</td></tr>';
+      return '<tr><td>'+esc(p.path)+'</td><td style="color:var(--t2)">'+esc(p.target)+'</td>'
+        +'<td>'+(p.websocket_enabled?'<span class="badge badge-blue">WS</span>':'<span style="color:var(--t3)">—</span>')+'</td>'
+        +'<td><button class="btn btn-danger btn-sm" onclick="delProxy(\''+esc(p.path)+'\')">Remover</button></td></tr>';
+    }).join(''):'<tr><td colspan="4" style="color:var(--t3);text-align:center;padding:24px">Nenhuma regra</td></tr>';
   });
 }
 function addProxy(){
@@ -1633,15 +1860,15 @@ function loadRedirects(){
     var rd=document.getElementById('redirects-body');
     var rds=d.redirects||[];
     rd.innerHTML=rds.length?rds.map(function(r){
-      return '<tr><td>'+esc(r.from)+'</td><td>'+esc(r.to)+'</td><td>'+r.code+'</td>'
-        +'<td><button class="btn btn-r btn-sm" onclick="delRedirect(\''+esc(r.from)+'\')">Remover</button></td></tr>';
-    }).join(''):'<tr><td colspan="4" style="color:var(--m);text-align:center">Nenhum redirect</td></tr>';
+      return '<tr><td>'+esc(r.from)+'</td><td style="color:var(--t2)">'+esc(r.to)+'</td><td><span class="badge badge-gray">'+r.code+'</span></td>'
+        +'<td><button class="btn btn-danger btn-sm" onclick="delRedirect(\''+esc(r.from)+'\')">Remover</button></td></tr>';
+    }).join(''):'<tr><td colspan="4" style="color:var(--t3);text-align:center;padding:24px">Nenhum redirect</td></tr>';
     var rw=document.getElementById('rewrites-body');
     var rws=d.rewrites||[];
     rw.innerHTML=rws.length?rws.map(function(r){
-      return '<tr><td>'+esc(r.from)+'</td><td>'+esc(r.to)+'</td>'
-        +'<td><button class="btn btn-r btn-sm" onclick="delRewrite(\''+esc(r.from)+'\')">Remover</button></td></tr>';
-    }).join(''):'<tr><td colspan="3" style="color:var(--m);text-align:center">Nenhum rewrite</td></tr>';
+      return '<tr><td>'+esc(r.from)+'</td><td style="color:var(--t2)">'+esc(r.to)+'</td>'
+        +'<td><button class="btn btn-danger btn-sm" onclick="delRewrite(\''+esc(r.from)+'\')">Remover</button></td></tr>';
+    }).join(''):'<tr><td colspan="3" style="color:var(--t3);text-align:center;padding:24px">Nenhum rewrite</td></tr>';
   });
 }
 function addRedirect(){
@@ -1666,10 +1893,11 @@ function loadMocks(){
     var t=document.getElementById('mocks-body');
     var mks=d.mock_routes||[];
     t.innerHTML=mks.length?mks.map(function(m){
-      return '<tr><td>'+esc(m.path)+'</td><td><span class="badge badge-blue">'+esc(m.method||'GET')+'</span></td>'
-        +'<td>'+m.status_code+'</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(m.body)+'</td>'
-        +'<td><button class="btn btn-r btn-sm" onclick="delMock(\''+esc(m.path)+'\')">Remover</button></td></tr>';
-    }).join(''):'<tr><td colspan="5" style="color:var(--m);text-align:center">Nenhuma mock route</td></tr>';
+      return '<tr><td>'+esc(m.path)+'</td><td><span class="badge badge-gray">'+esc(m.method||'GET')+'</span></td>'
+        +'<td><span class="badge badge-blue">'+m.status_code+'</span></td>'
+        +'<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t2)">'+esc(m.body)+'</td>'
+        +'<td><button class="btn btn-danger btn-sm" onclick="delMock(\''+esc(m.path)+'\')">Remover</button></td></tr>';
+    }).join(''):'<tr><td colspan="5" style="color:var(--t3);text-align:center;padding:24px">Nenhuma mock route</td></tr>';
   });
 }
 function addMock(){
@@ -1688,17 +1916,17 @@ function loadProcesses(){
     var t=document.getElementById('proc-body');
     t.innerHTML=(d&&d.length)?d.map(function(p){
       var sc=p.state==='running'?'badge-green':'badge-red';
-      return '<tr><td>'+esc(p.name)+'</td><td><span class="badge '+sc+'">'+p.state+'</span></td>'
-        +'<td>'+(p.pid||'—')+'</td><td>'+(p.port||'—')+'</td><td>'+(p.uptime||'—')+'</td>'
-        +'<td style="display:flex;gap:4px;padding:6px 14px">'
-        +'<button class="btn btn-sm btn-g" onclick="pact(\'start\',\''+esc(p.name)+'\')">▶</button>'
-        +'<button class="btn btn-sm btn-r" onclick="pact(\'stop\',\''+esc(p.name)+'\')">■</button>'
-        +'<button class="btn btn-sm" onclick="pact(\'restart\',\''+esc(p.name)+'\')">↺</button>'
+      return '<tr><td style="font-weight:500">'+esc(p.name)+'</td><td><span class="badge '+sc+'">'+p.state+'</span></td>'
+        +'<td style="color:var(--t2)">'+(p.pid||'—')+'</td><td style="color:var(--t2)">'+(p.port||'—')+'</td><td style="color:var(--t2)">'+(p.uptime||'—')+'</td>'
+        +'<td style="display:flex;gap:5px;padding:8px 20px">'
+        +'<button class="btn btn-sm" onclick="pact(\'start\',\''+esc(p.name)+'\')">Iniciar</button>'
+        +'<button class="btn btn-sm btn-danger" onclick="pact(\'stop\',\''+esc(p.name)+'\')">Parar</button>'
+        +'<button class="btn btn-sm" onclick="pact(\'restart\',\''+esc(p.name)+'\')">Reiniciar</button>'
         +'</td></tr>';
-    }).join(''):'<tr><td colspan="6" style="color:var(--m);text-align:center">Nenhum processo gerenciado</td></tr>';
+    }).join(''):'<tr><td colspan="6" style="color:var(--t3);text-align:center;padding:24px">Nenhum processo gerenciado</td></tr>';
   });
 }
-function pact(action,name){api('process/'+action,'POST',{name:name}).then(function(r){if(r.ok){toast(name+' → '+action);setTimeout(loadProcesses,700);}});}
+function pact(action,name){api('process/'+action,'POST',{name:name}).then(function(r){if(r.ok){toast(name+' — '+action);setTimeout(loadProcesses,700);}});}
 function autoDetect(){api('process/autodetect','POST').then(function(r){r.json().then(function(d){toast('Detectados: '+(d.detected||[]).join(', ')||'nenhum');setTimeout(loadProcesses,700);});});}
 
 // ── DNS/Hosts ──
@@ -1706,9 +1934,9 @@ function loadHosts(){
   apiGet('hosts/list').then(function(r){return r.json()}).then(function(d){
     var t=document.getElementById('hosts-body');
     t.innerHTML=(d&&d.length)?d.map(function(h){
-      return '<tr><td>'+esc(h.domain)+'</td><td>'+esc(h.ip)+'</td>'
-        +'<td><button class="btn btn-r btn-sm" onclick="delHost(\''+esc(h.domain)+'\')">Remover</button></td></tr>';
-    }).join(''):'<tr><td colspan="3" style="color:var(--m);text-align:center">Nenhuma entrada</td></tr>';
+      return '<tr><td style="font-weight:500">'+esc(h.domain)+'</td><td style="color:var(--t2)">'+esc(h.ip)+'</td>'
+        +'<td><button class="btn btn-danger btn-sm" onclick="delHost(\''+esc(h.domain)+'\')">Remover</button></td></tr>';
+    }).join(''):'<tr><td colspan="3" style="color:var(--t3);text-align:center;padding:24px">Nenhuma entrada</td></tr>';
   });
 }
 function addHost(){
@@ -1744,7 +1972,8 @@ function loadModules(){
     g.innerHTML=modulesDef.map(function(m){
       var on=!!stateMap[m.key];
       return '<div class="toggle-pill'+(on?' on':'')+ '" onclick="toggleMod(\''+m.key+'\','+(on?'false':'true')+',this)" id="tgl-'+m.key.replace('/','_')+'">'
-        +'<div class="switch"></div><div><div class="tname">'+m.label+'</div><div style="font-size:10px;color:var(--m)">'+m.desc+'</div></div></div>';
+        +'<div><div class="tname">'+m.label+'</div><div style="font-size:.7rem;color:var(--t3);margin-top:2px">'+m.desc+'</div></div>'
+        +'<div class="switch"></div></div>';
     }).join('');
   });
 }
