@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"flag"
@@ -1224,11 +1225,8 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 
 	token := cfg.APIToken
 
-	// Escape token para JavaScript
-	tokenJS := strings.ReplaceAll(strings.ReplaceAll(token, `\`, `\\`), "'", `\'`)
-
-	// Escape cfgJSON para HTML/JavaScript
-	cfgJSONStr := strings.ReplaceAll(strings.ReplaceAll(string(cfgJSON), `\`, `\\`), `</`, `<\/`)
+	// Encode token em base64 para evitar problemas com caracteres especiais
+	tokenB64 := base64.StdEncoding.EncodeToString([]byte(token))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(`<!DOCTYPE html>
@@ -1815,7 +1813,7 @@ textarea{
         <button class="btn btn-primary" onclick="saveConfig()">Salvar no Disco</button>
       </div>
       <div style="padding:0">
-        <textarea id="cfg-editor" spellcheck="false">` + cfgJSONStr + `</textarea>
+        <textarea id="cfg-editor" spellcheck="false">` + string(cfgJSON) + `</textarea>
       </div>
     </div>
   </div>
@@ -1824,7 +1822,9 @@ textarea{
 <div id="toast-container"></div>
 
 <script>
-var TOKEN = '` + tokenJS + `';
+// Decodificar token do base64
+var tokenB64 = '` + tokenB64 + `';
+var TOKEN = atob(tokenB64);
 var logs = ` + string(logsJSON) + `;
 var hist = ` + string(histJSON) + ` || [];
 
