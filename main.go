@@ -190,7 +190,7 @@ type Config struct {
 	InjectCSSPath          string               `json:"inject_css_path"`
 	SPAFallbackEnabled     bool                 `json:"spa_fallback_enabled"`
 	DirListingEnabled      bool                 `json:"dir_listing_enabled"`
-	GzipEnabled            bool                 `json:"gzip_enabled"`
+		http.Redirect(w, r, "/___brhttp/login", http.StatusFound)
 	BrotliEnabled          bool                 `json:"brotli_enabled"`
 	Custom404PagePath      string               `json:"custom_404_page_path"`
 	ProxyRules             []ProxyRule          `json:"proxy_rules"`
@@ -1831,7 +1831,15 @@ textarea{
   </div>
 </div>
 
+
 <div id="toast-container"></div>
+
+<pre style="background:#eee;color:#222;max-height:200px;overflow:auto;font-size:11px;padding:8px;border-radius:6px;margin:16px 0 0 0;">
+&lt;script&gt;
+function showTab(name) { ... }
+// (HTML real do script está no código fonte)
+&lt;/script&gt;
+</pre>
 
 <script>
 // Decodificar token do base64
