@@ -1224,6 +1224,12 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 
 	token := cfg.APIToken
 
+	// Escape token para JavaScript
+	tokenJS := strings.ReplaceAll(strings.ReplaceAll(token, `\`, `\\`), "'", `\'`)
+
+	// Escape cfgJSON para HTML/JavaScript
+	cfgJSONStr := strings.ReplaceAll(strings.ReplaceAll(string(cfgJSON), `\`, `\\`), `</`, `<\/`)
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(`<!DOCTYPE html>
 <html lang="pt-BR">
@@ -1809,7 +1815,7 @@ textarea{
         <button class="btn btn-primary" onclick="saveConfig()">Salvar no Disco</button>
       </div>
       <div style="padding:0">
-        <textarea id="cfg-editor" spellcheck="false">` + string(cfgJSON) + `</textarea>
+        <textarea id="cfg-editor" spellcheck="false">` + cfgJSONStr + `</textarea>
       </div>
     </div>
   </div>
@@ -1818,7 +1824,7 @@ textarea{
 <div id="toast-container"></div>
 
 <script>
-var TOKEN = '` + token + `';
+var TOKEN = '` + tokenJS + `';
 var logs = ` + string(logsJSON) + `;
 var hist = ` + string(histJSON) + ` || [];
 
