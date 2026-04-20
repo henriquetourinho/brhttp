@@ -35,7 +35,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const Version = "4.0.0"
+const Version = "4.1.0"
 
 // ─── Tipos de configuração ────────────────────────────────────────────────────
 
