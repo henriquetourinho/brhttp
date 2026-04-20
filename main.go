@@ -190,7 +190,7 @@ type Config struct {
 	InjectCSSPath          string               `json:"inject_css_path"`
 	SPAFallbackEnabled     bool                 `json:"spa_fallback_enabled"`
 	DirListingEnabled      bool                 `json:"dir_listing_enabled"`
-		http.Redirect(w, r, "/___brhttp/login", http.StatusFound)
+	GzipEnabled            bool                 `json:"gzip_enabled"`
 	BrotliEnabled          bool                 `json:"brotli_enabled"`
 	Custom404PagePath      string               `json:"custom_404_page_path"`
 	ProxyRules             []ProxyRule          `json:"proxy_rules"`
@@ -2162,8 +2162,8 @@ function loadScheduler(){
         +'<td style="color:var(--t2)">'+esc(j.command)+' '+esc((j.args||[]).join(' '))+'</td>'
         +'<td><span class="badge '+(j.enabled?'badge-green':'badge-gray')+'">'+(j.enabled?'ativo':'pausado')+'</span></td>'
         +'<td style="display:flex;gap:5px;padding:8px 20px">'
-        +'<button class="btn btn-sm btn-primary" onclick="runJobNow(''+esc(j.name)+'')">▶ Rodar</button>'
-        +'<button class="btn btn-sm btn-danger" onclick="delJob(''+esc(j.name)+'')">Remover</button>'
+        +'<button class="btn btn-sm btn-primary" onclick="runJobNow(\''+esc(j.name)+'\')">▶ Rodar</button>'
+        +'<button class="btn btn-sm btn-danger" onclick="delJob(\''+esc(j.name)+'\')">Remover</button>'
         +'</td></tr>';
     }).join(''):'<tr><td colspan="5" style="color:var(--t3);text-align:center;padding:24px">Nenhum job configurado</td></tr>';
   });
