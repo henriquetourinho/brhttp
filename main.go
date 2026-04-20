@@ -861,20 +861,33 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 		vhostRows = `<tr><td colspan="3" style="color:#8b949e">Nenhum virtual host</td></tr>`
 	}
 
-	html := fmt.Sprintf(`<!DOCTYPE html>
+
+	// Monta HTML sem fmt.Sprintf para evitar conflitos com % do CSS e tipos Go
+	httpsLink := ""
+	if cfg.HTTPSEnabled {
+		httpsLink = `· <a href="https://localhost:` + strconv.Itoa(cfg.HTTPSPort) + `" style="color:var(--g)" target="_blank">https:` + strconv.Itoa(cfg.HTTPSPort) + `</a>`
+	}
+
+	badge := func(b bool, label string) string {
+		cls := ""; txt := "OFF"
+		if b { cls = " on"; txt = "ON" }
+		return `<span class="badge` + cls + `">` + label + ` ` + txt + `</span>`
+	}
+
+	html := `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>brhttp v%s</title>
+<title>brhttp v` + Version + `</title>
 <style>
-:root{--bg:#0d1117;--s:#161b22;--b:#30363d;--t:#e6edf3;--m:#8b949e;--a:#58a6ff;--g:#3fb950;--r:#f85149;--y:#d29922;--p:#bc8cff}
+:root{--bg:#0d1117;--s:#161b22;--b:#30363d;--t:#e6edf3;--m:#8b949e;--a:#58a6ff;--g:#3fb950;--r:#f85149}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--t);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',monospace;font-size:13px}
 header{background:var(--s);border-bottom:1px solid var(--b);padding:12px 20px;display:flex;align-items:center;gap:10px}
 h1{font-size:1rem;font-weight:700;color:var(--a)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--g);animation:pulse 2s infinite;flex-shrink:0}
-@keyframes pulse{0%%,100%%{opacity:1}50%%{opacity:.3}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;padding:16px}
 .card{background:var(--s);border:1px solid var(--b);border-radius:8px;padding:14px}
 .label{font-size:10px;color:var(--m);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
@@ -885,100 +898,63 @@ section h2{font-size:10px;color:var(--m);text-transform:uppercase;letter-spacing
 .log-box{background:var(--s);border:1px solid var(--b);border-radius:8px;padding:12px;height:280px;overflow-y:auto;font-size:11px;line-height:1.6}
 .log-line{color:var(--m);border-bottom:1px solid #21262d;padding:1px 0}
 .log-line:last-child{color:var(--t)}
-table{width:100%%;border-collapse:collapse}
+table{width:100%;border-collapse:collapse}
 th{text-align:left;color:var(--m);font-weight:500;padding:5px 8px;border-bottom:1px solid var(--b);font-size:11px}
 td{padding:5px 8px;border-bottom:1px solid #21262d;font-size:12px}
 .actions{padding:0 16px 16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .btn{background:transparent;color:var(--a);border:1px solid var(--a);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer}
 .btn:hover{background:var(--a);color:#000}
-.btn.r{color:var(--r);border-color:var(--r)}
-.btn.r:hover{background:var(--r);color:#fff}
 .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;margin:2px;border:1px solid var(--b);color:var(--m)}
 .badge.on{border-color:#3fb95055;background:#3fb95015;color:var(--g)}
-.badge.warn{border-color:#d2992255;background:#d2992215;color:var(--y)}
 #flash{font-size:11px;color:var(--g);display:none;margin-left:8px}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 @media(max-width:500px){.two{grid-template-columns:1fr}}
-</style>
-</head>
-<body>
+</style></head><body>
 <header>
   <div class="dot"></div>
-  <h1>brhttp v%s</h1>
+  <h1>brhttp v` + Version + `</h1>
   <span style="color:var(--m);margin-left:auto">
-    <a href="http://localhost:%d" style="color:var(--a)" target="_blank">:%d</a>
-    %s
+    <a href="http://localhost:` + strconv.Itoa(cfg.Port) + `" style="color:var(--a)" target="_blank">:` + strconv.Itoa(cfg.Port) + `</a> ` + httpsLink + `
   </span>
 </header>
-
 <div class="grid">
-  <div class="card"><div class="label">Status</div><div class="val" style="font-size:1rem;color:var(--g)">● Online</div><div class="sub" id="up">%s</div></div>
-  <div class="card"><div class="label">Requisições</div><div class="val" id="req">%d</div><div class="sub">total</div></div>
-  <div class="card"><div class="label">Erros</div><div class="val" id="err" style="color:var(--r)">%d</div><div class="sub">4xx / 5xx</div></div>
-  <div class="card"><div class="label">WebSocket</div><div class="val" id="ws">%d</div><div class="sub">clientes</div></div>
+  <div class="card"><div class="label">Status</div><div class="val" style="font-size:1rem;color:var(--g)">● Online</div><div class="sub" id="up">` + uptime + `</div></div>
+  <div class="card"><div class="label">Requisições</div><div class="val" id="req">` + strconv.FormatInt(reqs, 10) + `</div><div class="sub">total</div></div>
+  <div class="card"><div class="label">Erros</div><div class="val" id="err" style="color:var(--r)">` + strconv.FormatInt(errs, 10) + `</div><div class="sub">4xx/5xx</div></div>
+  <div class="card"><div class="label">WebSocket</div><div class="val" id="ws">` + strconv.Itoa(cc) + `</div><div class="sub">clientes</div></div>
 </div>
-
-<section>
-  <h2>Módulos ativos</h2>
-  <span class="badge %s">Gzip %s</span>
-  <span class="badge %s">Brotli %s</span>
-  <span class="badge %s">SPA %s</span>
-  <span class="badge %s">FastCGI/PHP %s</span>
-  <span class="badge %s">Rate Limit %s</span>
-  <span class="badge %s">ETag %s</span>
-  <span class="badge %s">Cache Mode %s</span>
-  <span class="badge %s">Métricas %s</span>
-  <span class="badge %s">HTTPS %s</span>
+<section><h2>Módulos ativos</h2>` +
+		badge(cfg.GzipEnabled, "Gzip") + badge(cfg.BrotliEnabled, "Brotli") + badge(cfg.SPAFallbackEnabled, "SPA") +
+		badge(cfg.FastCGI.Enabled, "FastCGI/PHP") + badge(cfg.RateLimit.Enabled, "Rate Limit") +
+		badge(cfg.ETagEnabled, "ETag") + badge(cfg.CacheModeEnabled, "Cache") +
+		badge(cfg.MetricsEnabled, "Métricas") + badge(cfg.HTTPSEnabled, "HTTPS") + `
 </section>
-
 <div class="actions">
   <button class="btn" onclick="act('reload')">⚡ Live Reload</button>
-  <button class="btn" onclick="act('reload-config')">🔄 Recarregar Config</button>
+  <button class="btn" onclick="act('reload-config')">🔄 Config</button>
   <a href="/metrics" target="_blank"><button class="btn">📊 /metrics</button></a>
   <span id="flash">✓ Feito!</span>
 </div>
-
 <div class="two" style="padding:0 16px 16px">
-  <section style="padding:0">
-    <h2 style="margin-bottom:8px">Proxy Rules (%d)</h2>
-    <table><tr><th>Path</th><th>Target</th></tr>%s</table>
-  </section>
-  <section style="padding:0">
-    <h2 style="margin-bottom:8px">Virtual Hosts (%d)</h2>
-    <table><tr><th>Host</th><th>Dir</th><th>SPA</th></tr>%s</table>
-  </section>
+  <section style="padding:0"><h2 style="margin-bottom:8px">Proxy Rules (` + strconv.Itoa(len(cfg.ProxyRules)) + `)</h2>
+    <table><tr><th>Path</th><th>Target</th></tr>` + proxyRows + `</table></section>
+  <section style="padding:0"><h2 style="margin-bottom:8px">Virtual Hosts (` + strconv.Itoa(len(cfg.VirtualHosts)) + `)</h2>
+    <table><tr><th>Host</th><th>Dir</th><th>SPA</th></tr>` + vhostRows + `</table></section>
 </div>
-
-<section>
-  <h2>Mock Routes (%d)</h2>
-  <table><tr><th>Method</th><th>Path</th><th>Status</th><th>Delay</th></tr>%s</table>
-</section>
-
-<section>
-  <h2>Log em tempo real</h2>
-  <div class="log-box" id="logbox"></div>
-</section>
-
+<section><h2>Mock Routes (` + strconv.Itoa(len(cfg.MockRoutes)) + `)</h2>
+  <table><tr><th>Method</th><th>Path</th><th>Status</th><th>Delay</th></tr>` + mockRows + `</table></section>
+<section><h2>Log em tempo real</h2><div class="log-box" id="logbox"></div></section>
 <script>
-var logs = %s;
-var box = document.getElementById('logbox');
+var logs=` + string(logsJSON) + `;
+var box=document.getElementById('logbox');
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function render(){box.innerHTML=logs.map(function(l){return '<div class="log-line">'+esc(l)+'</div>'}).join('');box.scrollTop=box.scrollHeight}
 render();
-
-var ws = new WebSocket('ws://'+location.host+'/ws');
-ws.onmessage = function(e){
-  var m = JSON.parse(e.data);
-  if(m.type==='log'){logs.push(m.line);if(logs.length>500)logs=logs.slice(-500);render();}
-};
-ws.onclose = function(){setTimeout(function(){location.reload()},2000)};
-
+var ws=new WebSocket('ws://'+location.host+'/ws');
+ws.onmessage=function(e){var m=JSON.parse(e.data);if(m.type==='log'){logs.push(m.line);if(logs.length>500)logs=logs.slice(-500);render();}};
+ws.onclose=function(){setTimeout(function(){location.reload()},2000)};
 function flash(){var f=document.getElementById('flash');f.style.display='inline';setTimeout(function(){f.style.display='none'},2000)}
-function act(endpoint){
-  fetch('/api/'+endpoint,{method:'POST',headers:{'Authorization':'Bearer %s'}})
-    .then(function(r){if(r.ok)flash();});
-}
-
+function act(ep){fetch('/api/'+ep,{method:'POST',headers:{'Authorization':'Bearer ` + cfg.APIToken + `'}}).then(function(r){if(r.ok)flash()})}
 setInterval(function(){
   fetch('/___brhttp/metrics-json').then(function(r){return r.json()}).then(function(d){
     document.getElementById('req').textContent=d.requests;
@@ -987,33 +963,7 @@ setInterval(function(){
     document.getElementById('up').textContent=d.uptime;
   });
 },3000);
-</script>
-</body>
-</html>`,
-		Version, Version,
-		cfg.Port, cfg.Port,
-		func() string {
-			if cfg.HTTPSEnabled {
-				return fmt.Sprintf(`· <a href="https://localhost:%d" style="color:var(--g)" target="_blank">https:%d</a>`, cfg.HTTPSPort, cfg.HTTPSPort)
-			}
-			return ""
-		}(),
-		uptime, reqs, errs, cc,
-		badgeClass(cfg.GzipEnabled), badgeText(cfg.GzipEnabled),
-		badgeClass(cfg.BrotliEnabled), badgeText(cfg.BrotliEnabled),
-		badgeClass(cfg.SPAFallbackEnabled), badgeText(cfg.SPAFallbackEnabled),
-		badgeClass(cfg.FastCGI.Enabled), badgeText(cfg.FastCGI.Enabled),
-		badgeClass(cfg.RateLimit.Enabled), badgeText(cfg.RateLimit.Enabled),
-		badgeClass(cfg.ETagEnabled), badgeText(cfg.ETagEnabled),
-		badgeClass(cfg.CacheModeEnabled), badgeText(cfg.CacheModeEnabled),
-		badgeClass(cfg.MetricsEnabled), badgeText(cfg.MetricsEnabled),
-		badgeClass(cfg.HTTPSEnabled), badgeText(cfg.HTTPSEnabled),
-		len(cfg.ProxyRules), proxyRows,
-		len(cfg.VirtualHosts), vhostRows,
-		len(cfg.MockRoutes), mockRows,
-		string(logsJSON),
-		cfg.APIToken,
-	)
+</script></body></html>`
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
