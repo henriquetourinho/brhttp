@@ -3162,10 +3162,6 @@ func logToVHost(f *os.File, msg string) {
 	if f == nil {
 		return
 	}
-	line := fmt.Sprintf("[%s] %s"
-", time.Now().Format("2006-01-02 15:04:05"), msg)
-	f.WriteString(line)
-}
 
 // ─── v4.5 — Basic Auth middleware ────────────────────────────────────────────
 
@@ -4151,4 +4147,14 @@ func main() {
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatalf("HTTP erro: %v", err)
 	}
+}		}()
+	}
+
+	select {}
+}
+			srv.ListenAndServeTLS("", "")
+		}()
+	}
+
+	select {}
 }
