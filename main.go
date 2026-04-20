@@ -4411,18 +4411,32 @@ func main() {
 
 			if cfg.HTTPSCertFile != "" && cfg.HTTPSKeyFile != "" {
 				// Usa certificado fornecido pelo usuário
+				log.Printf("  📄 Carregando certificado de: %s", cfg.HTTPSCertFile)
 				cert, err := tls.LoadX509KeyPair(cfg.HTTPSCertFile, cfg.HTTPSKeyFile)
 				if err != nil {
-					log.Fatalf("Erro ao carregar certificado TLS: %v", err)
+					log.Fatalf("❌ Erro ao carregar certificado TLS: %v", err)
 				}
-				tlsCfg = &tls.Config{Certificates: []tls.Certificate{cert}}
+				tlsCfg = &tls.Config{
+					Certificates: []tls.Certificate{cert},
+					MinVersion:   tls.VersionTLS12,
+				}
+				log.Printf("  ✅ Certificado carregado com sucesso")
 			} else {
 				// Gera certificado self-signed automaticamente
+				log.Printf("  🔑 Gerando certificado self-signed...")
 				cert, err := generateSelfSignedCert()
 				if err != nil {
-					log.Fatalf("Erro ao gerar certificado self-signed: %v", err)
+					log.Fatalf("❌ Erro ao gerar certificado self-signed: %v", err)
 				}
-				tlsCfg = &tls.Config{Certificates: []tls.Certificate{cert}}
+				tlsCfg = &tls.Config{
+					Certificates: []tls.Certificate{cert},
+					MinVersion:   tls.VersionTLS12,
+				}
+				log.Printf("  ✅ Certificado auto-assinado gerado com sucesso")
+			}
+
+			if tlsCfg == nil {
+				log.Fatalf("❌ Configuração TLS não foi inicializada corretamente")
 			}
 
 			httpsSrv := &http.Server{
@@ -4431,8 +4445,9 @@ func main() {
 				TLSConfig: tlsCfg,
 			}
 
-			if err := httpsSrv.ListenAndServeTLS("", ""); err != nil {
-				log.Fatalf("Erro HTTPS: %v", err)
+			log.Printf("  🚀 Iniciando servidor HTTPS em %s", httpsAddr)
+			if err := httpsSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("❌ Erro ao iniciar servidor HTTPS: %v", err)
 			}
 		}()
 	}
