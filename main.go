@@ -3365,7 +3365,7 @@ func main() {
 	logFileFlag := flag.String("log-file", "", "Arquivo de log (vazio = stdout)")
 	apiTokenFlag := flag.String("api-token", "", "Token da API")
 	httpsFlag := flag.Bool("https", false, "Habilita HTTPS auto-assinado")
-	httpsPortFlag := flag.Int("https-port", 5572, "Porta HTTPS")
+	httpsPortFlag := flag.Int("https-port", 443, "Porta HTTPS")
 	dashboardFlag := flag.Bool("dashboard", true, "Dashboard em /___brhttp")
 	metricsFlag := flag.Bool("metrics", false, "Métricas Prometheus em /metrics")
 	phpFlag := flag.String("php", "", "Endereço php-fpm (ex: 127.0.0.1:9000)")

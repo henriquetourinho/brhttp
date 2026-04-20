@@ -5,8 +5,8 @@
   "gzip_enabled": true,
   "dashboard_enabled": true,
   "metrics_enabled": false,
-  "https_enabled": false,
-  "https_port": 5572,
+  "https_enabled": true,
+  "https_port": 443,
   "watch_debounce_ms": 100,
   "watch_exclude_dirs": [
     "node_modules",
