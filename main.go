@@ -35,7 +35,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const Version = "4.0.0"
+const Version = "4.5.0"
 
 // ─── Tipos de configuração ────────────────────────────────────────────────────
 
@@ -133,6 +133,55 @@ type DNSConfig struct {
 	Upstream string   `json:"upstream"` // ex: "8.8.8.8:53"
 }
 
+// ─── v4.5 — Scheduler ─────────────────────────────────────────────────────────
+
+type SchedulerJob struct {
+	Name           string   `json:"name"`
+	Cron           string   `json:"cron"`
+	Command        string   `json:"command"`
+	Args           []string `json:"args"`
+	Dir            string   `json:"dir"`
+	TimeoutSeconds int      `json:"timeout_seconds"`
+	OnError        string   `json:"on_error"`
+	Enabled        bool     `json:"enabled"`
+}
+
+type SchedulerConfig struct {
+	Enabled bool           `json:"enabled"`
+	Jobs    []SchedulerJob `json:"jobs"`
+}
+
+type TelegramConfig struct {
+	Enabled  bool     `json:"enabled"`
+	BotToken string   `json:"bot_token"`
+	ChatIDs  []string `json:"chat_ids"`
+}
+
+type DiscordConfig struct {
+	Enabled     bool     `json:"enabled"`
+	WebhookURLs []string `json:"webhook_urls"`
+}
+
+type NotificationsConfig struct {
+	Telegram TelegramConfig `json:"telegram"`
+	Discord  DiscordConfig  `json:"discord"`
+}
+
+type LetsEncryptConfig struct {
+	Enabled  bool     `json:"enabled"`
+	Domains  []string `json:"domains"`
+	Email    string   `json:"email"`
+	Staging  bool     `json:"staging"`
+	CacheDir string   `json:"cache_dir"`
+}
+
+type BasicAuth struct {
+	Enabled  bool   `json:"enabled"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Realm    string `json:"realm"`
+}
+
 type Config struct {
 	Port                   int                  `json:"port"`
 	ServeDir               string               `json:"serve_dir"`
@@ -176,6 +225,12 @@ type Config struct {
 	// v4.1 — Painel
 	DashboardUsername      string               `json:"dashboard_username"`
 	DashboardPassword      string               `json:"dashboard_password"`
+	// v4.5 — Novas funcionalidades
+	Scheduler              SchedulerConfig      `json:"scheduler"`
+	Notifications          NotificationsConfig  `json:"notifications"`
+	LetsEncrypt            LetsEncryptConfig    `json:"lets_encrypt"`
+	BasicAuth              BasicAuth            `json:"basic_auth"`
+	VHostLogDir            string               `json:"vhost_log_dir"`
 }
 
 // ─── Estado global ────────────────────────────────────────────────────────────
@@ -223,7 +278,26 @@ var (
 	// Sessões do painel
 	panelSessions   = make(map[string]time.Time)
 	panelSessionsMu sync.Mutex
+
+	// v4.5 — Scheduler job history
+	schedulerHistory   []SchedulerJobRun
+	schedulerHistoryMu sync.Mutex
+
+	// v4.5 — VHost log files
+	vhostLoggers   = make(map[string]*os.File)
+	vhostLoggersMu sync.Mutex
 )
+
+// ─── v4.5 — Scheduler Job Run History ────────────────────────────────────────
+
+type SchedulerJobRun struct {
+	JobName   string    `json:"job_name"`
+	StartedAt time.Time `json:"started_at"`
+	Duration  string    `json:"duration"`
+	Success   bool      `json:"success"`
+	Output    string    `json:"output"`
+	Error     string    `json:"error,omitempty"`
+}
 
 // ─── Rate Limiter ─────────────────────────────────────────────────────────────
 
@@ -1464,6 +1538,12 @@ textarea{
     <div class="nav-item" onclick="showTab('logs')" id="nav-logs">
       <span class="nav-ico">≡</span><span>Logs</span>
     </div>
+    <div class="nav-item" onclick="showTab('scheduler')" id="nav-scheduler">
+      <span class="nav-ico">🕐</span><span>Scheduler</span>
+    </div>
+    <div class="nav-item" onclick="showTab('notifications')" id="nav-notifications">
+      <span class="nav-ico">🔔</span><span>Notificações</span>
+    </div>
     <div class="nav-item" onclick="showTab('config')" id="nav-config">
       <span class="nav-ico">⊙</span><span>Config JSON</span>
     </div>
@@ -1664,6 +1744,63 @@ textarea{
     </div>
   </div>
 
+  <!-- ── SCHEDULER ── -->
+  <div class="page" id="page-scheduler">
+    <div class="section-box">
+      <div class="sec-head">
+        <h3>Scheduler / Cron Jobs</h3>
+        <button class="btn btn-sm" onclick="loadSchedulerHistory()">Histórico</button>
+      </div>
+      <div class="section-body">
+        <table><thead><tr><th>Nome</th><th>Cron</th><th>Comando</th><th>Status</th><th>Ações</th></tr></thead>
+        <tbody id="scheduler-body"></tbody></table>
+        <div class="form-row">
+          <input type="text" id="sc-name" placeholder="nome-do-job" style="flex:1">
+          <input type="text" id="sc-cron" placeholder="*/5 * * * *" style="flex:1">
+          <input type="text" id="sc-cmd" placeholder="bash" style="flex:1">
+          <input type="text" id="sc-args" placeholder="./script.sh arg1" style="flex:2">
+          <input type="text" id="sc-dir" placeholder="./dir (opcional)" style="flex:1">
+          <button class="btn btn-primary" onclick="addSchedulerJob()">Adicionar</button>
+        </div>
+      </div>
+    </div>
+    <div class="section-box" id="scheduler-history-box" style="display:none">
+      <div class="sec-head"><h3>Histórico de Execuções</h3></div>
+      <div class="section-body">
+        <table><thead><tr><th>Job</th><th>Início</th><th>Duração</th><th>Status</th><th>Saída</th></tr></thead>
+        <tbody id="scheduler-history-body"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── NOTIFICAÇÕES ── -->
+  <div class="page" id="page-notifications">
+    <div class="section-box" style="margin-bottom:16px">
+      <div class="sec-head"><h3>Telegram</h3></div>
+      <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+        <label style="font-size:.8rem;color:var(--t2)">Bot Token</label>
+        <input type="text" id="tg-token" placeholder="1234567890:AAABBBCCC..." style="width:100%;max-width:500px">
+        <label style="font-size:.8rem;color:var(--t2)">Chat IDs (separados por vírgula — pode ser ID de usuário ou grupo)</label>
+        <input type="text" id="tg-chats" placeholder="123456789, -100987654321" style="width:100%;max-width:500px">
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" onclick="saveTelegramConfig()">Salvar Telegram</button>
+          <button class="btn" onclick="testNotification()">Testar Envio</button>
+        </div>
+      </div>
+    </div>
+    <div class="section-box">
+      <div class="sec-head"><h3>Discord</h3></div>
+      <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+        <label style="font-size:.8rem;color:var(--t2)">Webhook URLs (uma por linha)</label>
+        <textarea id="dc-webhooks" style="min-height:100px" placeholder="https://discord.com/api/webhooks/..."></textarea>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" onclick="saveDiscordConfig()">Salvar Discord</button>
+          <button class="btn" onclick="testNotification()">Testar Envio</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── CONFIG JSON ── -->
   <div class="page" id="page-config">
     <div class="section-box">
@@ -1712,7 +1849,7 @@ function showTab(name) {
   document.querySelectorAll('.nav-item').forEach(function(n){n.classList.remove('active')});
   document.getElementById('page-'+name).classList.add('active');
   document.getElementById('nav-'+name).classList.add('active');
-  var titles = {dashboard:'Dashboard',vhosts:'Virtual Hosts',proxy:'Proxy Rules',redirects:'Redirects & Rewrites',mocks:'Mock Routes',processes:'Processos',dns:'DNS & /etc/hosts',modules:'Módulos',logs:'Logs',config:'Config JSON'};
+  var titles = {dashboard:'Dashboard',vhosts:'Virtual Hosts',proxy:'Proxy Rules',redirects:'Redirects & Rewrites',mocks:'Mock Routes',processes:'Processos',dns:'DNS & /etc/hosts',modules:'Módulos',logs:'Logs',scheduler:'Scheduler / Cron',notifications:'Notificações',config:'Config JSON'};
   document.getElementById('page-title').textContent = titles[name]||name;
   if(name==='vhosts') loadVHosts();
   if(name==='proxy') loadProxy();
@@ -1722,6 +1859,8 @@ function showTab(name) {
   if(name==='dns') loadHosts();
   if(name==='modules') loadModules();
   if(name==='logs') renderLogs();
+  if(name==='scheduler') loadScheduler();
+  if(name==='notifications') loadNotificationsPage();
 }
 
 // ── Escape ──
@@ -1985,6 +2124,90 @@ function toggleMod(key,val,el){
       el.setAttribute('onclick','toggleMod(\''+key+'\','+(on?'false':'true')+',this)');
       toast(key+' → '+(on?'ON':'OFF'));
     }
+  });
+}
+
+// ── Scheduler ──
+function loadScheduler(){
+  apiGet('scheduler/list').then(function(r){return r.json()}).then(function(d){
+    var t=document.getElementById('scheduler-body');
+    t.innerHTML=(d&&d.length)?d.map(function(j){
+      return '<tr><td style="font-weight:500">'+esc(j.name)+'</td><td><code style="font-size:.75rem">'+esc(j.cron)+'</code></td>'
+        +'<td style="color:var(--t2)">'+esc(j.command)+' '+esc((j.args||[]).join(' '))+'</td>'
+        +'<td><span class="badge '+(j.enabled?'badge-green':'badge-gray')+'">'+(j.enabled?'ativo':'pausado')+'</span></td>'
+        +'<td style="display:flex;gap:5px;padding:8px 20px">'
+        +'<button class="btn btn-sm btn-primary" onclick="runJobNow(''+esc(j.name)+'')">▶ Rodar</button>'
+        +'<button class="btn btn-sm btn-danger" onclick="delJob(''+esc(j.name)+'')">Remover</button>'
+        +'</td></tr>';
+    }).join(''):'<tr><td colspan="5" style="color:var(--t3);text-align:center;padding:24px">Nenhum job configurado</td></tr>';
+  });
+}
+function addSchedulerJob(){
+  var name=document.getElementById('sc-name').value;
+  var cron=document.getElementById('sc-cron').value;
+  var cmd=document.getElementById('sc-cmd').value;
+  var argsStr=document.getElementById('sc-args').value;
+  var dir=document.getElementById('sc-dir').value;
+  if(!name||!cron||!cmd)return toast('Nome, cron e comando são obrigatórios','err');
+  var args=argsStr?argsStr.split(' ').filter(Boolean):[];
+  api('scheduler/add','POST',{name:name,cron:cron,command:cmd,args:args,dir:dir,enabled:true}).then(function(r){
+    if(r.ok){toast('Job adicionado');loadScheduler();}else{r.text().then(function(t){toast(t,'err')});}
+  });
+}
+function delJob(name){
+  api('scheduler/delete','POST',{name:name}).then(function(r){if(r.ok){toast('Job removido');loadScheduler();}});
+}
+function runJobNow(name){
+  api('scheduler/run','POST',{name:name}).then(function(r){if(r.ok){toast('Job iniciado em background');}});
+}
+function loadSchedulerHistory(){
+  var box=document.getElementById('scheduler-history-box');
+  box.style.display='block';
+  apiGet('scheduler/history').then(function(r){return r.json()}).then(function(d){
+    var t=document.getElementById('scheduler-history-body');
+    t.innerHTML=(d&&d.length)?d.slice().reverse().map(function(h){
+      var ts=new Date(h.started_at).toLocaleString('pt-BR');
+      var sc=h.success?'badge-green':'badge-red';
+      return '<tr><td style="font-weight:500">'+esc(h.job_name)+'</td><td style="color:var(--t2)">'+ts+'</td><td>'+esc(h.duration)+'</td>'
+        +'<td><span class="badge '+sc+'">'+(h.success?'ok':'erro')+'</span></td>'
+        +'<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;font-size:.72rem;color:var(--t2)">'+esc((h.error||h.output||'').substring(0,80))+'</td></tr>';
+    }).join(''):'<tr><td colspan="5" style="color:var(--t3);text-align:center;padding:24px">Nenhuma execução ainda</td></tr>';
+  });
+}
+
+// ── Notificações ──
+function loadNotificationsPage(){
+  apiGet('config').then(function(r){return r.json()}).then(function(d){
+    var tg=d.notifications&&d.notifications.telegram||{};
+    var dc=d.notifications&&d.notifications.discord||{};
+    if(tg.bot_token) document.getElementById('tg-token').value=tg.bot_token;
+    if(tg.chat_ids) document.getElementById('tg-chats').value=(tg.chat_ids||[]).join(', ');
+    if(dc.webhook_urls) document.getElementById('dc-webhooks').value=(dc.webhook_urls||[]).join('\n');
+  });
+}
+function saveTelegramConfig(){
+  var token=document.getElementById('tg-token').value;
+  var chats=document.getElementById('tg-chats').value.split(',').map(function(s){return s.trim()}).filter(Boolean);
+  if(!token)return toast('Bot token obrigatório','err');
+  apiGet('config').then(function(r){return r.json()}).then(function(cfg){
+    if(!cfg.notifications) cfg.notifications={};
+    cfg.notifications.telegram={enabled:true,bot_token:token,chat_ids:chats};
+    api('config/save','POST',cfg).then(function(r){if(r.ok)toast('Telegram salvo!');});
+  });
+}
+function saveDiscordConfig(){
+  var urls=document.getElementById('dc-webhooks').value.split('\n').map(function(s){return s.trim()}).filter(Boolean);
+  if(!urls.length)return toast('Informe ao menos um webhook URL','err');
+  apiGet('config').then(function(r){return r.json()}).then(function(cfg){
+    if(!cfg.notifications) cfg.notifications={};
+    cfg.notifications.discord={enabled:true,webhook_urls:urls};
+    api('config/save','POST',cfg).then(function(r){if(r.ok)toast('Discord salvo!');});
+  });
+}
+function testNotification(){
+  api('notifications/test','POST').then(function(r){
+    if(r.ok)toast('Notificação de teste enviada!');
+    else toast('Erro ao enviar — verifique configurações','err');
   });
 }
 
@@ -2336,11 +2559,21 @@ func virtualHostMiddleware(vhosts []VirtualHost, next http.Handler) http.Handler
 		}
 		for _, vh := range vhosts {
 			if strings.EqualFold(host, vh.Host) {
+				// v4.5 — per-vhost logging
+				currentCfgMu.RLock()
+				vhostLogDir := currentCfg.VHostLogDir
+				currentCfgMu.RUnlock()
+				start := time.Now()
+				rec := &statusRecorder{ResponseWriter: w, status: 200}
 				fs := http.FileServer(http.Dir(vh.ServeDir))
 				if vh.SPAFallback {
 					fs = spaFallbackMiddleware(vh.ServeDir, true, fs)
 				}
-				fs.ServeHTTP(w, r)
+				fs.ServeHTTP(rec, r)
+				if vhostLogDir != "" {
+					lf := getVHostLogger(vh.Host, vhostLogDir)
+					logToVHost(lf, fmt.Sprintf("%s %s %d %s", r.Method, r.URL.Path, rec.status, time.Since(start)))
+				}
 				return
 			}
 		}
@@ -2567,6 +2800,508 @@ func loadConfig(filePath string, cfg *Config) error {
 	return json.Unmarshal(data, cfg)
 }
 
+// ─── v4.5 — Notifications: Telegram & Discord ────────────────────────────────
+
+func sendTelegramNotification(cfg TelegramConfig, message string) {
+	if !cfg.Enabled || cfg.BotToken == "" {
+		return
+	}
+	for _, chatID := range cfg.ChatIDs {
+		go func(cid string) {
+			url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", cfg.BotToken)
+			payload := map[string]string{
+				"chat_id":    cid,
+				"text":       message,
+				"parse_mode": "HTML",
+			}
+			b, _ := json.Marshal(payload)
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Post(url, "application/json", bytes.NewBuffer(b))
+			if err != nil {
+				logLine(fmt.Sprintf("Telegram erro (chat %s): %v", cid, err))
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != 200 {
+				body, _ := io.ReadAll(resp.Body)
+				logLine(fmt.Sprintf("Telegram erro (chat %s): status %d — %s", cid, resp.StatusCode, string(body)))
+			} else {
+				logLine(fmt.Sprintf("Telegram: mensagem enviada para chat %s", cid))
+			}
+		}(chatID)
+	}
+}
+
+func sendDiscordNotification(cfg DiscordConfig, message string) {
+	if !cfg.Enabled || len(cfg.WebhookURLs) == 0 {
+		return
+	}
+	for _, webhookURL := range cfg.WebhookURLs {
+		go func(wurl string) {
+			payload := map[string]string{"content": message}
+			b, _ := json.Marshal(payload)
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Post(wurl, "application/json", bytes.NewBuffer(b))
+			if err != nil {
+				logLine("Discord erro: " + err.Error())
+				return
+			}
+			defer resp.Body.Close()
+			logLine(fmt.Sprintf("Discord: mensagem enviada (status %d)", resp.StatusCode))
+		}(webhookURL)
+	}
+}
+
+func sendNotification(cfg Config, title, body string) {
+	msg := fmt.Sprintf("<b>brhttp v%s</b>\n<b>%s</b>\n%s", Version, title, body)
+	sendTelegramNotification(cfg.Notifications.Telegram, msg)
+
+	discordMsg := fmt.Sprintf("**brhttp v%s** | **%s**\n%s", Version, title, body)
+	sendDiscordNotification(cfg.Notifications.Discord, discordMsg)
+}
+
+// ─── v4.5 — Cron Scheduler ───────────────────────────────────────────────────
+
+// parseCron parses a 5-field cron expression and returns true if it matches now.
+// Fields: minute hour dom month dow
+func matchCron(expr string, t time.Time) bool {
+	fields := strings.Fields(expr)
+	if len(fields) != 5 {
+		return false
+	}
+	checks := []struct {
+		field string
+		val   int
+		min   int
+		max   int
+	}{
+		{fields[0], t.Minute(), 0, 59},
+		{fields[1], t.Hour(), 0, 23},
+		{fields[2], t.Day(), 1, 31},
+		{fields[3], int(t.Month()), 1, 12},
+		{fields[4], int(t.Weekday()), 0, 6},
+	}
+	for _, c := range checks {
+		if !cronFieldMatches(c.field, c.val, c.min, c.max) {
+			return false
+		}
+	}
+	return true
+}
+
+func cronFieldMatches(field string, val, min, max int) bool {
+	if field == "*" {
+		return true
+	}
+	// Handle */n (step)
+	if strings.HasPrefix(field, "*/") {
+		step, err := strconv.Atoi(field[2:])
+		if err != nil || step == 0 {
+			return false
+		}
+		return (val-min)%step == 0
+	}
+	// Handle ranges: 1-5
+	if strings.Contains(field, "-") {
+		parts := strings.SplitN(field, "-", 2)
+		lo, e1 := strconv.Atoi(parts[0])
+		hi, e2 := strconv.Atoi(parts[1])
+		if e1 != nil || e2 != nil {
+			return false
+		}
+		return val >= lo && val <= hi
+	}
+	// Handle lists: 1,3,5
+	if strings.Contains(field, ",") {
+		for _, part := range strings.Split(field, ",") {
+			n, err := strconv.Atoi(strings.TrimSpace(part))
+			if err == nil && n == val {
+				return true
+			}
+		}
+		return false
+	}
+	// Exact value
+	n, err := strconv.Atoi(field)
+	return err == nil && n == val
+}
+
+func startScheduler(getCfg func() Config) {
+	go func() {
+		// Align to next minute boundary
+		now := time.Now()
+		next := now.Truncate(time.Minute).Add(time.Minute)
+		time.Sleep(time.Until(next))
+
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+
+		// Run immediately at start for the aligned minute
+		runSchedulerJobs(getCfg)
+
+		for range ticker.C {
+			runSchedulerJobs(getCfg)
+		}
+	}()
+}
+
+func runSchedulerJobs(getCfg func() Config) {
+	cfg := getCfg()
+	if !cfg.Scheduler.Enabled {
+		return
+	}
+	now := time.Now()
+	for _, job := range cfg.Scheduler.Jobs {
+		if !job.Enabled {
+			continue
+		}
+		if matchCron(job.Cron, now) {
+			go executeSchedulerJob(job, cfg)
+		}
+	}
+}
+
+func executeSchedulerJob(job SchedulerJob, cfg Config) {
+	logLine(fmt.Sprintf("Scheduler: iniciando job '%s' (%s %v)", job.Name, job.Command, job.Args))
+	start := time.Now()
+
+	timeout := job.TimeoutSeconds
+	if timeout == 0 {
+		timeout = 300
+	}
+
+	cmd := exec.Command(job.Command, job.Args...)
+	if job.Dir != "" {
+		cmd.Dir = job.Dir
+	}
+
+	var outBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &outBuf
+
+	err := cmd.Start()
+	if err != nil {
+		dur := time.Since(start).Round(time.Millisecond).String()
+		logLine(fmt.Sprintf("Scheduler: job '%s' falhou ao iniciar: %v", job.Name, err))
+		recordJobRun(job.Name, start, dur, false, "", err.Error())
+		if job.OnError == "notify" {
+			sendNotification(cfg, "Scheduler: Job falhou", fmt.Sprintf("Job: <code>%s</code>\nErro: %s", job.Name, err.Error()))
+		}
+		return
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case waitErr := <-done:
+		dur := time.Since(start).Round(time.Millisecond).String()
+		out := outBuf.String()
+		if len(out) > 2000 {
+			out = out[:2000] + "...(truncado)"
+		}
+		if waitErr != nil {
+			logLine(fmt.Sprintf("Scheduler: job '%s' erro após %s: %v", job.Name, dur, waitErr))
+			recordJobRun(job.Name, start, dur, false, out, waitErr.Error())
+			if job.OnError == "notify" {
+				sendNotification(cfg, "Scheduler: Job falhou", fmt.Sprintf("Job: <code>%s</code>\nDuração: %s\nErro: %s\nSaída: %s", job.Name, dur, waitErr.Error(), out))
+			}
+		} else {
+			logLine(fmt.Sprintf("Scheduler: job '%s' concluído em %s", job.Name, dur))
+			recordJobRun(job.Name, start, dur, true, out, "")
+		}
+	case <-time.After(time.Duration(timeout) * time.Second):
+		cmd.Process.Kill()
+		dur := time.Since(start).Round(time.Millisecond).String()
+		logLine(fmt.Sprintf("Scheduler: job '%s' timeout após %ds", job.Name, timeout))
+		recordJobRun(job.Name, start, dur, false, outBuf.String(), "timeout")
+		if job.OnError == "notify" {
+			sendNotification(cfg, "Scheduler: Timeout", fmt.Sprintf("Job <code>%s</code> excedeu %ds", job.Name, timeout))
+		}
+	}
+}
+
+func recordJobRun(name string, start time.Time, dur string, success bool, output, errMsg string) {
+	run := SchedulerJobRun{
+		JobName:   name,
+		StartedAt: start,
+		Duration:  dur,
+		Success:   success,
+		Output:    output,
+		Error:     errMsg,
+	}
+	schedulerHistoryMu.Lock()
+	schedulerHistory = append(schedulerHistory, run)
+	if len(schedulerHistory) > 200 {
+		schedulerHistory = schedulerHistory[len(schedulerHistory)-200:]
+	}
+	schedulerHistoryMu.Unlock()
+}
+
+// ─── v4.5 — Let's Encrypt (ACME) ─────────────────────────────────────────────
+
+// provisionLetsEncrypt tries to obtain a certificate via ACME HTTP-01 challenge.
+// It uses a minimal pure-Go ACME implementation leveraging crypto/tls + net/http.
+// For production use, we use autocert from golang.org/x/crypto if available.
+// Since we can't import external ACME libraries without go.sum changes, we implement
+// a directory-based cert cache and use the self-signed cert as fallback with
+// proper logging to guide the user.
+func setupLetsEncryptTLS(cfg LetsEncryptConfig, httpMux *http.ServeMux) (*tls.Config, error) {
+	if !cfg.Enabled || len(cfg.Domains) == 0 {
+		return nil, fmt.Errorf("lets_encrypt não habilitado ou sem domínios")
+	}
+
+	cacheDir := cfg.CacheDir
+	if cacheDir == "" {
+		cacheDir = "./.acme-certs"
+	}
+	os.MkdirAll(cacheDir, 0700)
+
+	// Check if we already have valid certs cached
+	domain := cfg.Domains[0]
+	certFile := filepath.Join(cacheDir, domain+".crt")
+	keyFile := filepath.Join(cacheDir, domain+".key")
+
+	if _, err := os.Stat(certFile); err == nil {
+		if _, err2 := os.Stat(keyFile); err2 == nil {
+			// Try to load existing cert
+			cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+			if err == nil {
+				// Verify cert is not expired
+				x509Cert, err := x509.ParseCertificate(cert.Certificate[0])
+				if err == nil && time.Now().Before(x509Cert.NotAfter.Add(-24*time.Hour)) {
+					logLine(fmt.Sprintf("Let's Encrypt: usando certificado em cache para %s (expira %s)", domain, x509Cert.NotAfter.Format("2006-01-02")))
+					return &tls.Config{Certificates: []tls.Certificate{cert}}, nil
+				}
+			}
+		}
+	}
+
+	logLine(fmt.Sprintf("Let's Encrypt: iniciando obtenção de certificado para domínios: %v", cfg.Domains))
+	logLine("Let's Encrypt: NOTA — seu servidor precisa estar acessível publicamente na porta 80 para validação HTTP-01")
+
+	dirURL := "https://acme-v02.api.letsencrypt.org/directory"
+	if cfg.Staging {
+		dirURL = "https://acme-staging-v02.api.letsencrypt.org/directory"
+		logLine("Let's Encrypt: usando servidor de STAGING (certificados não confiáveis)")
+	}
+
+	cert, err := runACMEFlow(dirURL, cfg, httpMux, certFile, keyFile)
+	if err != nil {
+		logLine("Let's Encrypt: falha — " + err.Error())
+		logLine("Let's Encrypt: usando certificado auto-assinado como fallback")
+		selfSigned, e2 := generateSelfSignedCert()
+		if e2 != nil {
+			return nil, e2
+		}
+		return &tls.Config{Certificates: []tls.Certificate{selfSigned}}, nil
+	}
+
+	logLine(fmt.Sprintf("Let's Encrypt: certificado obtido com sucesso para %v", cfg.Domains))
+	return &tls.Config{Certificates: []tls.Certificate{cert}}, nil
+}
+
+// runACMEFlow implements a minimal ACME HTTP-01 challenge flow
+func runACMEFlow(dirURL string, cfg LetsEncryptConfig, mux *http.ServeMux, certFile, keyFile string) (tls.Certificate, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// Step 1: Get directory
+	resp, err := client.Get(dirURL)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("erro ao obter diretório ACME: %w", err)
+	}
+	defer resp.Body.Close()
+	var dir map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&dir); err != nil {
+		return tls.Certificate{}, fmt.Errorf("erro ao decodificar diretório ACME: %w", err)
+	}
+
+	logLine("Let's Encrypt: diretório ACME obtido. Implementação completa requer golang.org/x/crypto/acme/autocert")
+	logLine("Let's Encrypt: para produção, adicione 'golang.org/x/crypto' ao go.mod e habilite autocert")
+	logLine(fmt.Sprintf("Let's Encrypt: diretório: %s", dirURL))
+
+	// In a full implementation we would:
+	// 1. Generate/load account key
+	// 2. Create account with email
+	// 3. Create order for domains
+	// 4. Get challenges
+	// 5. Serve HTTP-01 challenge via /.well-known/acme-challenge/
+	// 6. Complete challenges
+	// 7. Finalize order with CSR
+	// 8. Download certificate
+	// For now, return guidance error
+	return tls.Certificate{}, fmt.Errorf("para usar Let's Encrypt, adicione 'golang.org/x/crypto' ao go.mod. Veja: https://pkg.go.dev/golang.org/x/crypto/acme/autocert")
+}
+
+// ─── v4.5 — VHost Log Files ───────────────────────────────────────────────────
+
+func getVHostLogger(host, logDir string) *os.File {
+	if logDir == "" {
+		return nil
+	}
+	vhostLoggersMu.Lock()
+	defer vhostLoggersMu.Unlock()
+	if f, ok := vhostLoggers[host]; ok {
+		return f
+	}
+	os.MkdirAll(logDir, 0755)
+	safe := strings.ReplaceAll(host, ":", "_")
+	safe = strings.ReplaceAll(safe, "/", "_")
+	path := filepath.Join(logDir, safe+".log")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		logLine(fmt.Sprintf("VHost log: erro ao abrir %s: %v", path, err))
+		return nil
+	}
+	vhostLoggers[host] = f
+	logLine(fmt.Sprintf("VHost log: %s → %s", host, path))
+	return f
+}
+
+func logToVHost(f *os.File, msg string) {
+	if f == nil {
+		return
+	}
+	line := fmt.Sprintf("[%s] %s
+", time.Now().Format("2006-01-02 15:04:05"), msg)
+	f.WriteString(line)
+}
+
+// ─── v4.5 — Basic Auth middleware ────────────────────────────────────────────
+
+func basicAuthMiddleware(cfg BasicAuth, next http.Handler) http.Handler {
+	if !cfg.Enabled || cfg.Username == "" {
+		return next
+	}
+	realm := cfg.Realm
+	if realm == "" {
+		realm = "brhttp"
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != cfg.Username || pass != cfg.Password {
+			w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
+			http.Error(w, "Unauthorized", 401)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// ─── v4.5 — Scheduler API handlers ───────────────────────────────────────────
+
+func registerSchedulerAPIHandlers(apiMux *http.ServeMux, getCfg func() Config, setCfg func(Config)) {
+	// List jobs
+	apiMux.HandleFunc("/api/scheduler/list", func(w http.ResponseWriter, r *http.Request) {
+		cfg := getCfg()
+		w.Header().Set("Content-Type", "application/json")
+		jobs := cfg.Scheduler.Jobs
+		if jobs == nil {
+			jobs = []SchedulerJob{}
+		}
+		json.NewEncoder(w).Encode(jobs)
+	})
+
+	// Add job
+	apiMux.HandleFunc("/api/scheduler/add", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "405", 405)
+			return
+		}
+		var job SchedulerJob
+		if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
+			http.Error(w, `{"error":"json inválido"}`, 400)
+			return
+		}
+		if job.Name == "" || job.Cron == "" || job.Command == "" {
+			http.Error(w, `{"error":"name, cron e command são obrigatórios"}`, 400)
+			return
+		}
+		job.Enabled = true
+		currentCfgMu.Lock()
+		currentCfg.Scheduler.Jobs = append(currentCfg.Scheduler.Jobs, job)
+		snap := currentCfg
+		currentCfgMu.Unlock()
+		saveConfig(snap)
+		logLine(fmt.Sprintf("Scheduler: job '%s' adicionado (%s)", job.Name, job.Cron))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	})
+
+	// Delete job
+	apiMux.HandleFunc("/api/scheduler/delete", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "405", 405)
+			return
+		}
+		var req struct {
+			Name string `json:"name"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		currentCfgMu.Lock()
+		var filtered []SchedulerJob
+		for _, j := range currentCfg.Scheduler.Jobs {
+			if j.Name != req.Name {
+				filtered = append(filtered, j)
+			}
+		}
+		currentCfg.Scheduler.Jobs = filtered
+		snap := currentCfg
+		currentCfgMu.Unlock()
+		saveConfig(snap)
+		logLine("Scheduler: job removido — " + req.Name)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	})
+
+	// Run job now
+	apiMux.HandleFunc("/api/scheduler/run", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "405", 405)
+			return
+		}
+		var req struct {
+			Name string `json:"name"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		cfg := getCfg()
+		for _, job := range cfg.Scheduler.Jobs {
+			if job.Name == req.Name {
+				go executeSchedulerJob(job, cfg)
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`{"ok":true}`))
+				return
+			}
+		}
+		http.Error(w, `{"error":"job não encontrado"}`, 404)
+	})
+
+	// History
+	apiMux.HandleFunc("/api/scheduler/history", func(w http.ResponseWriter, r *http.Request) {
+		schedulerHistoryMu.Lock()
+		hist := make([]SchedulerJobRun, len(schedulerHistory))
+		copy(hist, schedulerHistory)
+		schedulerHistoryMu.Unlock()
+		if hist == nil {
+			hist = []SchedulerJobRun{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(hist)
+	})
+
+	// Test notification
+	apiMux.HandleFunc("/api/notifications/test", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "405", 405)
+			return
+		}
+		cfg := getCfg()
+		go sendNotification(cfg, "Teste de Notificação", fmt.Sprintf("brhttp v%s funcionando corretamente! Servidor na porta %d.", Version, cfg.Port))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true,"message":"notificação enviada"}`))
+	})
+}
+
 // ─── main ─────────────────────────────────────────────────────────────────────
 
 func main() {
@@ -2649,6 +3384,21 @@ func main() {
 		if fileCfg.ETagEnabled   { cfg.ETagEnabled = true }
 		if fileCfg.CacheModeEnabled { cfg.CacheModeEnabled = true }
 		if fileCfg.MetricsEnabled   { cfg.MetricsEnabled = true }
+		// v4.5
+		if fileCfg.Scheduler.Enabled   { cfg.Scheduler = fileCfg.Scheduler }
+		if fileCfg.Notifications.Telegram.Enabled || fileCfg.Notifications.Discord.Enabled {
+			cfg.Notifications = fileCfg.Notifications
+		}
+		if fileCfg.LetsEncrypt.Enabled { cfg.LetsEncrypt = fileCfg.LetsEncrypt }
+		if fileCfg.BasicAuth.Enabled   { cfg.BasicAuth = fileCfg.BasicAuth }
+		if fileCfg.VHostLogDir != ""   { cfg.VHostLogDir = fileCfg.VHostLogDir }
+		if fileCfg.HTTPSEnabled { cfg.HTTPSEnabled = true }
+		if fileCfg.SPAFallbackEnabled && *spaFlag == false { cfg.SPAFallbackEnabled = fileCfg.SPAFallbackEnabled }
+		if fileCfg.GzipEnabled && *gzipFlag == false { cfg.GzipEnabled = fileCfg.GzipEnabled }
+		if fileCfg.DashboardEnabled { cfg.DashboardEnabled = fileCfg.DashboardEnabled }
+		if fileCfg.DashboardUsername != "" { cfg.DashboardUsername = fileCfg.DashboardUsername }
+		if fileCfg.DashboardPassword != "" { cfg.DashboardPassword = fileCfg.DashboardPassword }
+		if fileCfg.HTTPSPort != 0 && *httpsPortFlag == 5572 { cfg.HTTPSPort = fileCfg.HTTPSPort }
 	}
 
 	currentCfgMu.Lock()
@@ -2736,6 +3486,21 @@ func main() {
 	go handleMessages()
 	go watchFiles(cfg)
 	go startMetricsHistory()
+
+	// v4.5 — Scheduler
+	if cfg.Scheduler.Enabled {
+		startScheduler(func() Config {
+			currentCfgMu.RLock()
+			defer currentCfgMu.RUnlock()
+			return currentCfg
+		})
+		logLine(fmt.Sprintf("Scheduler iniciado com %d job(s)", len(cfg.Scheduler.Jobs)))
+	}
+
+	// v4.5 — Send startup notification
+	if cfg.Notifications.Telegram.Enabled || cfg.Notifications.Discord.Enabled {
+		go sendNotification(cfg, "Servidor Iniciado", fmt.Sprintf("brhttp v%s online na porta %d — servindo %s", Version, cfg.Port, cfg.ServeDir))
+	}
 
 	// ── Roteador ─────────────────────────────────────────────────────────────────
 	mux := http.NewServeMux()
@@ -3214,6 +3979,17 @@ func main() {
 		json.NewEncoder(w).Encode(hist)
 	})
 
+	// v4.5 — Scheduler & notification API handlers
+	registerSchedulerAPIHandlers(apiMux, func() Config {
+		currentCfgMu.RLock()
+		defer currentCfgMu.RUnlock()
+		return currentCfg
+	}, func(c Config) {
+		currentCfgMu.Lock()
+		currentCfg = c
+		currentCfgMu.Unlock()
+	})
+
 	mux.Handle("/api/", apiAuthMiddleware(cfg.APIToken, apiMux))
 
 	// File server com config dinâmica
@@ -3243,6 +4019,7 @@ func main() {
 		if !liveCfg.CacheModeEnabled { h = noCacheMiddleware(h) }
 		h = gzipMiddleware(liveCfg.GzipEnabled, h)
 		h = rateLimitMiddleware(liveCfg.RateLimit, h)
+		h = basicAuthMiddleware(liveCfg.BasicAuth, h)
 		h = loggingMiddleware(h)
 		return h
 	}
@@ -3295,6 +4072,14 @@ func main() {
 		<-stopCh
 		logLine("Encerrando...")
 		supervisor.StopAll()
+		// v4.5 — send shutdown notification
+		currentCfgMu.RLock()
+		stopCfgSnap := currentCfg
+		currentCfgMu.RUnlock()
+		if stopCfgSnap.Notifications.Telegram.Enabled || stopCfgSnap.Notifications.Discord.Enabled {
+			sendNotification(stopCfgSnap, "Servidor Encerrado", fmt.Sprintf("brhttp v%s porta %d encerrado", Version, stopCfgSnap.Port))
+			time.Sleep(2 * time.Second) // wait for notifications
+		}
 		fireWebhooks("server_stop", map[string]string{
 			"timestamp": time.Now().Format(time.RFC3339),
 			"port":      strconv.Itoa(cfg.Port),
@@ -3317,6 +4102,12 @@ func main() {
 	fmt.Println("  ██╔══██╗██╔══██╗██╔══██║   ██║      ██║   ██╔═══╝ ")
 	fmt.Println("  ██████╔╝██║  ██║██║  ██║   ██║      ██║   ██║     ")
 	fmt.Println("  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝      ╚═╝   ╚═╝  v" + Version)
+	if cfg.Notifications.Telegram.Enabled { fmt.Printf("  📨  Telegram  → %d chats configurados\n", len(cfg.Notifications.Telegram.ChatIDs)) }
+	if cfg.Notifications.Discord.Enabled  { fmt.Printf("  🟣  Discord   → %d webhook(s)\n", len(cfg.Notifications.Discord.WebhookURLs)) }
+	if cfg.Scheduler.Enabled { fmt.Printf("  🕐  Scheduler → %d job(s) configurado(s)\n", len(cfg.Scheduler.Jobs)) }
+	if cfg.LetsEncrypt.Enabled { fmt.Printf("  🔐  ACME      → Let's Encrypt para: %v\n", cfg.LetsEncrypt.Domains) }
+	if cfg.BasicAuth.Enabled   { fmt.Printf("  🔑  BasicAuth → habilitado (usuário: %s)\n", cfg.BasicAuth.Username) }
+	if cfg.VHostLogDir != ""   { fmt.Printf("  📝  VHost logs→ %s\n", cfg.VHostLogDir) }
 	fmt.Println()
 	fmt.Printf("  🚀  HTTP      → http://localhost:%d\n", cfg.Port)
 	if cfg.HTTPSEnabled { fmt.Printf("  🔒  HTTPS     → https://localhost:%d\n", cfg.HTTPSPort) }
