@@ -403,7 +403,7 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 
 	logsJSON, _ := json.Marshal(logs)
 
-	uptime := time.Since(serverStart).Round(time.Second).String()
+	uptime := fmt.Sprintf("%s", time.Since(serverStart).Round(time.Second))
 
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="pt-BR">
@@ -1024,7 +1024,7 @@ func main() {
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"connected_clients": cc,
 				"request_count":     rc,
-				"uptime":            time.Since(serverStart).Round(time.Second).String(),
+				"uptime":            fmt.Sprintf("%s", time.Since(serverStart).Round(time.Second)),
 			})
 		})
 	}
