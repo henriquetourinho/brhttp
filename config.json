@@ -8,44 +8,119 @@
   "https_enabled": false,
   "https_port": 5572,
   "watch_debounce_ms": 100,
-  "watch_exclude_dirs": ["node_modules", ".git", "dist", "vendor"],
+  "watch_exclude_dirs": [
+    "node_modules",
+    ".git",
+    "dist",
+    "vendor"
+  ],
   "api_token": "troque-por-token-secreto",
   "api_command_enabled": false,
-  "api_command_allow_list": ["npm", "git", "make", "php", "python3"],
-
+  "api_command_allow_list": [
+    "npm",
+    "git",
+    "make",
+    "php",
+    "python3"
+  ],
+  "basic_auth": {
+    "enabled": false,
+    "username": "admin",
+    "password": "senha-segura",
+    "realm": "brhttp"
+  },
+  "vhost_log_dir": "",
   "fastcgi": {
     "enabled": false,
     "address": "127.0.0.1:9000",
-    "extensions": [".php"],
+    "extensions": [
+      ".php"
+    ],
     "root": "",
     "auto_start": false
   },
-
   "rate_limit": {
     "enabled": false,
     "requests_per_minute": 120,
     "burst_size": 20
   },
-
   "dns": {
     "enabled": false,
     "port": 5353,
-    "domains": ["*.localhost", "*.dev.local"],
+    "domains": [
+      "*.localhost",
+      "*.dev.local"
+    ],
     "upstream": "8.8.8.8:53"
   },
-
+  "scheduler": {
+    "enabled": false,
+    "jobs": [
+      {
+        "name": "exemplo-backup",
+        "cron": "0 2 * * *",
+        "command": "bash",
+        "args": [
+          "./scripts/backup.sh"
+        ],
+        "dir": "./",
+        "timeout_seconds": 300,
+        "on_error": "notify",
+        "enabled": false
+      },
+      {
+        "name": "limpar-cache",
+        "cron": "*/15 * * * *",
+        "command": "echo",
+        "args": [
+          "cache limpo"
+        ],
+        "dir": "",
+        "timeout_seconds": 30,
+        "on_error": "log",
+        "enabled": false
+      }
+    ]
+  },
+  "notifications": {
+    "telegram": {
+      "enabled": false,
+      "bot_token": "SEU-BOT-TOKEN-AQUI",
+      "chat_ids": [
+        "SEU-CHAT-ID",
+        "OUTRO-CHAT-ID"
+      ]
+    },
+    "discord": {
+      "enabled": false,
+      "webhook_urls": [
+        "https://discord.com/api/webhooks/SEU-WEBHOOK"
+      ]
+    }
+  },
+  "lets_encrypt": {
+    "enabled": false,
+    "domains": [
+      "meusite.com",
+      "www.meusite.com"
+    ],
+    "email": "seu@email.com",
+    "staging": true,
+    "cache_dir": "./.acme-certs"
+  },
   "processes": [
     {
       "name": "meu-backend",
       "command": "node",
-      "args": ["server.js"],
+      "args": [
+        "server.js"
+      ],
       "dir": "./backend",
       "auto_start": false,
       "auto_restart": true,
       "port": 3000
     }
   ],
-
   "extra_ports": [
     {
       "port": 3001,
@@ -53,14 +128,12 @@
       "https": false
     }
   ],
-
   "hosts_entries": [
     {
       "ip": "127.0.0.1",
       "domain": "meusite.local"
     }
   ],
-
   "proxy_rules": [
     {
       "path": "/api/",
@@ -68,7 +141,6 @@
       "websocket_enabled": false
     }
   ],
-
   "virtual_hosts": [
     {
       "host": "projeto-a.localhost",
@@ -83,7 +155,6 @@
       "runtime": "php"
     }
   ],
-
   "mock_routes": [
     {
       "path": "/api/user",
@@ -93,25 +164,24 @@
       "delay_ms": 0
     }
   ],
-
   "custom_headers": [
     {
       "path": "/api/",
       "headers": {
-        "X-Powered-By": "brhttp/4.0",
+        "X-Powered-By": "brhttp/4.5",
         "X-Content-Type-Options": "nosniff"
       }
     }
   ],
-
   "redirects": [],
   "rewrites": [],
-
   "command_webhooks": [
     {
       "event": "server_start",
       "command": "echo",
-      "args": ["brhttp v4 iniciado na porta {{port}}"]
+      "args": [
+        "brhttp v4.5 iniciado na porta {{port}}"
+      ]
     }
   ]
 }

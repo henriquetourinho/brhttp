@@ -1,0 +1,80 @@
+/* ======================================================================== */
+/* Gerador Whats Brasil | Ficheiro 1/3: Tema e Variáveis Globais          */
+/* ======================================================================== */
+
+:root {
+    /* TEMA CLARO - PALETA FINAL */
+    --cor-primaria: #00e785;
+    --cor-secundaria: #00c672;
+    --cor-acento-roxo: #8500e7;
+    
+    --cor-fundo: #FFFFFF;
+    --cor-card: #FFFFFF;
+    --cor-fundo-alternativo: #f8fafc;
+    --cor-texto-principal: #1f2937;
+    --cor-texto-secundario: #6b7280;
+    --cor-borda: #e5e7eb;
+    --cor-header-fundo: rgba(255, 255, 255, 0.8);
+    --cor-bolha-msg: #dcf8c6;
+    --cor-fundo-chat: #efeae2;
+    --cor-recibo-leitura: #53bdeb;
+
+    /* TEMA ESCURO - AJUSTADO */
+    --cor-fundo-dark: #111827;
+    --cor-card-dark: #1f2937;
+    --cor-fundo-alternativo-dark: #1a212e;
+    --cor-texto-principal-dark: #f9fafb;
+    --cor-texto-secundario-dark: #9ca3af;
+    --cor-borda-dark: #374151;
+    --cor-header-fundo-dark: rgba(17, 24, 39, 0.8);
+    --cor-bolha-msg-dark: #005C4B;
+    --cor-fundo-chat-dark: #0b141a;
+
+    /* Novas variáveis para o Footer */
+    --cor-footer-fundo: #111827;
+    --cor-footer-texto: #9ca3af;
+    --cor-footer-heading: #ffffff;
+    
+    /* Layout */
+    --raio-borda: 12px;
+    --sombra-card: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+    --sombra-card-hover: 0 10px 15px -3px rgba(0, 0, 0, 0.07), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    
+    /* Espaçamento Modular */
+    --spacing-xs: 0.5rem;   /* 8px */
+    --spacing-sm: 1rem;     /* 16px */
+    --spacing-md: 1.5rem;   /* 24px */
+    --spacing-lg: 2rem;     /* 32px */
+    --spacing-xl: 4rem;     /* 64px */
+    --spacing-xxl: 6rem;    /* 96px */
+}
+
+/* --- ESTILOS GLOBAIS --- */
+* { 
+    margin: 0; 
+    padding: 0; 
+    box-sizing: border-box; 
+}
+html { 
+    scroll-behavior: smooth; 
+}
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: var(--cor-fundo);
+    color: var(--cor-texto-principal);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+body[data-theme="dark"] {
+    background-color: var(--cor-fundo-dark);
+    color: var(--cor-texto-principal-dark);
+}
+.container { 
+    width: 100%; 
+    max-width: 1200px; 
+    margin: 0 auto; 
+    padding: 0 var(--spacing-md); 
+}
+.hidden { 
+    display: none !important; 
+}

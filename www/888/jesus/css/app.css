@@ -1,0 +1,179 @@
+/* ======================================================================== */
+/* Gerador Whats Brasil | Arquivo: app.css (v3.2 - Correção Final)        */
+/* ======================================================================== */
+
+/* --- LAYOUT DE BLOCOS DA APLICAÇÃO --- */
+.page-section {
+    padding-block: clamp(var(--spacing-xl), 10vw, var(--spacing-xxl));
+}
+#analytics, #meus-modelos, #historico, #gerenciamento, #faq, #donation-section {
+    background-color: var(--cor-fundo-alternativo);
+}
+body[data-theme="dark"] #analytics, 
+body[data-theme="dark"] #meus-modelos,
+body[data-theme="dark"] #historico,
+body[data-theme="dark"] #gerenciamento,
+body[data-theme="dark"] #faq,
+body[data-theme="dark"] #donation-section {
+    background-color: var(--cor-fundo-alternativo-dark);
+}
+.section-title { font-size: clamp(1.8rem, 4vw, 2.5rem); font-weight: 800; text-align: center; margin-bottom: var(--spacing-sm); }
+.section-subtitle { font-size: 1.1rem; color: var(--cor-texto-secundario); text-align: center; max-width: 600px; margin: 0 auto var(--spacing-xl) auto; line-height: 1.6; }
+.section-title.left-aligned, .section-subtitle.left-aligned {
+    text-align: left; margin-left: 0; margin-right: 0;
+}
+
+/* --- GRID PRINCIPAL DA FERRAMENTA --- */
+.main-grid-container {
+    display: grid; grid-template-columns: 1fr;
+    gap: clamp(var(--spacing-lg), 4vw, var(--spacing-xl));
+    align-items: flex-start;
+}
+@media (min-width: 992px) {
+    .main-grid-container { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
+}
+.form-column { max-width: 100%; }
+@media (min-width: 992px) { .form-column { max-width: 550px; } }
+
+/* --- FORMULÁRIO GERAL --- */
+.trust-badges { display: flex; flex-wrap: wrap; gap: var(--spacing-sm); margin-bottom: var(--spacing-lg); }
+.badge { font-weight: 500; display: inline-flex; align-items: center; gap: var(--spacing-xs); font-size: 0.9rem; color: var(--cor-texto-secundario); }
+.badge svg { color: var(--cor-acento-roxo); }
+body[data-theme="dark"] .badge svg { color: var(--cor-primaria); }
+.form-group { margin-bottom: var(--spacing-md); }
+.form-group label { display: block; font-weight: 600; margin-bottom: var(--spacing-xs); font-size: 0.9rem; }
+textarea, select, input[type="tel"], input[type="text"], input[type="email"], input[type="url"] {
+    width: 100%; font-family: inherit; padding: 0.85rem 1rem; font-size: 1rem;
+    border: 1px solid var(--cor-borda); border-radius: var(--raio-borda);
+    background-color: var(--cor-fundo-alternativo); color: var(--cor-texto-principal);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+body[data-theme="dark"] textarea, body[data-theme="dark"] select, body[data-theme="dark"] input[type="tel"], body[data-theme="dark"] input[type="text"], body[data-theme="dark"] input[type="email"], body[data-theme="dark"] input[type="url"] {
+    background-color: #2D3748; color: var(--cor-texto-principal-dark); border-color: var(--cor-borda-dark);
+}
+textarea:focus, select:focus, input[type="tel"]:focus, input[type="text"]:focus, input[type="email"]:focus, input[type="url"]:focus {
+    outline: none; box-shadow: 0 0 0 3px rgba(0, 231, 133, 0.4); border-color: var(--cor-primaria); }
+.radio-group { display: flex; gap: var(--spacing-sm); background-color: var(--cor-fundo-alternativo); padding: var(--spacing-xs); border-radius: var(--raio-borda); border: 1px solid var(--cor-borda); }
+body[data-theme="dark"] .radio-group { background-color: var(--cor-borda-dark); border-color: var(--cor-fundo-alternativo-dark); }
+.radio-label { flex: 1; padding: 0.75rem; border-radius: 8px; cursor: pointer; text-align: center; font-weight: 600; transition: all 0.2s ease-in-out; border: 2px solid transparent; position: relative; }
+.radio-label span { color: var(--cor-texto-secundario); transition: color 0.2s; }
+.radio-label input[type="radio"] { display: none; }
+.radio-label.active { background-color: var(--cor-card); border-color: var(--cor-primaria); box-shadow: 0 2px 8px rgba(0, 231, 133, 0.1); }
+.radio-label.active span { color: var(--cor-primaria); }
+body[data-theme="dark"] .radio-label.active { background-color: var(--cor-card-dark); border-color: var(--cor-primaria); }
+.form-actions { margin-top: var(--spacing-lg); display: flex; flex-wrap: wrap; gap: var(--spacing-sm); align-items: stretch; }
+.cta-button { padding: 1rem; border-radius: var(--raio-borda); text-decoration: none; font-size: 1rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 0.75rem; cursor: pointer; border: none; transition: all 0.2s ease; }
+.cta-button.solid { flex-grow: 1; background-color: var(--cor-primaria); color: #000; box-shadow: 0 4px 15px rgba(0, 231, 133, 0.2); }
+.cta-button.solid:hover { background-color: var(--cor-secundaria); transform: translateY(-2px); }
+.cta-button.secondary { flex-shrink: 0; background-color: var(--cor-borda); color: var(--cor-texto-secundario); border: 2px solid var(--cor-borda); padding: 0 1rem; }
+.cta-button.secondary:hover { background-color: #dcdcdc; }
+body[data-theme="dark"] .cta-button.secondary { background-color: var(--cor-borda-dark); color: var(--cor-texto-secundario-dark); }
+body[data-theme="dark"] .cta-button.secondary:hover { background-color: #3a3a3a; }
+.cta-button.small { padding: 0.75rem 1.5rem; align-self: flex-start; }
+.checkbox-label { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; font-weight: 500; font-size: 0.9rem; }
+.checkbox-label input[type="checkbox"] { width: 1.15em; height: 1.15em; accent-color: var(--cor-primaria); }
+
+/* --- COMPONENTES DA FERRAMENTA --- */
+.list-container, .faq-container, .custom-template-form-container, .data-management-container { max-width: 768px; margin-left: auto; margin-right: auto; }
+.list-container { display: flex; flex-direction: column; gap: var(--spacing-sm); }
+.history-item, .custom-template-item, .analytics-item { background: var(--cor-card); border: 1px solid var(--cor-borda); border-radius: var(--raio-borda); padding: var(--spacing-md); display: flex; justify-content: space-between; align-items: center; gap: var(--spacing-sm); transition: box-shadow 0.2s, transform 0.2s; }
+.history-item:hover, .custom-template-item:hover, .analytics-item:hover { box-shadow: var(--sombra-card-hover); transform: translateY(-2px); }
+body[data-theme="dark"] .history-item, body[data-theme="dark"] .custom-template-item, body[data-theme="dark"] .analytics-item { background: var(--cor-card-dark); border-color: var(--cor-borda-dark); }
+.history-item-info, .custom-template-item-info, .analytics-item-info { flex-grow: 1; min-width: 0; }
+.history-item-number, .custom-template-item-title, .analytics-item-name { font-weight: 700; display: block; margin-bottom: var(--spacing-xs); }
+.history-item-message, .custom-template-item-text, .analytics-item-destination { font-size: 0.9rem; color: var(--cor-texto-secundario); word-break: break-all; }
+body[data-theme="dark"] .history-item-message, body[data-theme="dark"] .custom-template-item-text, body[data-theme="dark"] .analytics-item-destination { color: var(--cor-texto-secundario-dark); }
+.history-item-actions, .custom-template-item-actions, .analytics-item-actions { display: flex; gap: var(--spacing-xs); flex-shrink: 0; }
+.history-delete-btn:hover, .custom-template-delete-btn:hover, .delete-analytics-link-btn:hover { color: #D32F2F !important; }
+
+/* CORREÇÃO: Estilo dos ícones de ação */
+.icon-button {
+    background-color: var(--cor-fundo-alternativo);
+    color: var(--cor-texto-secundario);
+    border: 1px solid var(--cor-borda);
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.icon-button:hover { background-color: var(--cor-borda); color: var(--cor-texto-principal); }
+body[data-theme="dark"] .icon-button { background-color: var(--cor-borda-dark); border-color: #4a5568; color: var(--cor-texto-secundario-dark); }
+body[data-theme="dark"] .icon-button:hover { background-color: #4a5568; }
+
+/* MELHORIA: Design dos Meus Modelos */
+#meus-modelos .custom-template-form-container {
+    border: 1px solid var(--cor-borda);
+    box-shadow: var(--sombra-card);
+    padding: var(--spacing-lg);
+    background-color: var(--cor-card);
+    border-radius: var(--raio-borda);
+    margin-bottom: var(--spacing-lg);
+}
+body[data-theme="dark"] #meus-modelos .custom-template-form-container { border-color: var(--cor-borda-dark); background-color: var(--cor-card-dark); }
+.template-empty-message, .history-empty-message { text-align: center; color: var(--cor-texto-secundario); padding: var(--spacing-lg); background-color: var(--cor-card); border: 1px dashed var(--cor-borda); border-radius: var(--raio-borda); }
+body[data-theme="dark"] .template-empty-message, body[data-theme="dark"] .history-empty-message { background-color: var(--cor-card-dark); border-color: var(--cor-borda-dark); }
+
+/* CORREÇÃO: Quebra de linha e estilo dos botões de template */
+.template-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-xs);
+}
+.template-item {
+    background-color: var(--cor-fundo-alternativo);
+    border: 1px solid var(--cor-borda);
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--cor-texto-secundario);
+    text-align: center;
+}
+body[data-theme="dark"] .template-item {
+    background-color: var(--cor-borda-dark);
+    border-color: var(--cor-borda-dark);
+    color: var(--cor-texto-secundario-dark);
+}
+.template-item:hover {
+    color: var(--cor-primaria);
+    border-color: var(--cor-primaria);
+    background-color: var(--cor-card);
+}
+
+/* PREVIEW DO CELULAR */
+.preview-column { display: none; }
+@media (min-width: 992px) {
+    .preview-column { display: flex; flex-direction: column; align-items: center; padding-top: 6rem; justify-content: start; }
+    .preview-column .android-mockup { position: sticky; top: 120px; }
+}
+.android-mockup { width: 300px; height: 610px; background-color: var(--cor-card); border: 1px solid #ccc; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); display: flex; flex-direction: column; overflow: hidden; }
+body[data-theme="dark"] .android-mockup { background-color: var(--cor-fundo-chat-dark); border-color: #333; }
+.chat-header { background-color: var(--cor-card); padding: 10px 15px; display: flex; align-items: center; gap: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); flex-shrink: 0; }
+body[data-theme="dark"] .chat-header { background-color: var(--cor-card-dark); }
+.chat-body { flex-grow: 1; padding: 15px; display: flex; flex-direction: column; gap: 0.75rem; overflow-y: auto; background-color: var(--cor-fundo-chat); }
+.message-bubble.sent { background-color: var(--cor-bolha-msg); }
+body[data-theme="dark"] .message-bubble.sent { background-color: var(--cor-bolha-msg-dark); }
+
+/* FAQ */
+.faq-container { max-width: 768px; margin: 0 auto; }
+.faq-item { border-bottom: 1px solid var(--cor-borda); }
+body[data-theme="dark"] .faq-item { border-color: var(--cor-borda-dark); }
+.faq-question { padding: var(--spacing-md) var(--spacing-xs); font-weight: 600; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+.faq-question:hover { color: var(--cor-primaria); }
+.faq-question::-webkit-details-marker { display: none; }
+.faq-question::after { content: '+'; font-size: 1.5rem; color: var(--cor-texto-secundario); transition: transform 0.2s ease; }
+.faq-item[open] > .faq-question::after { transform: rotate(45deg); }
+.faq-answer { padding: 0 var(--spacing-xs) var(--spacing-md); color: var(--cor-texto-secundario); line-height: 1.7; }
+
+/* RESPONSIVIDADE PARA COMPONENTES */
+@media (max-width: 768px) {
+    .history-item, .custom-template-item, .analytics-item { flex-direction: column; align-items: stretch; }
+    .history-item-actions, .custom-template-item-actions, .analytics-item-actions { width: 100%; padding-top: var(--spacing-sm); border-top: 1px solid var(--cor-borda); justify-content: flex-end; }
+    body[data-theme="dark"] .history-item-actions, body[data-theme="dark"] .custom-template-item-actions, body[data-theme="dark"] .analytics-item-actions { border-top-color: var(--cor-borda-dark); }
+    .name-grid { grid-template-columns: 1fr; }
+}
