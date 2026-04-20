@@ -1230,8 +1230,15 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	tokenJSON, _ := json.Marshal(tokenB64)
 
 	// Escapar cfgJSON para ser seguro em HTML
-	cfgJSONEscaped := strings.ReplaceAll(string(cfgJSON), `\`, `\\`)
-	cfgJSONEscaped = strings.ReplaceAll(cfgJSONEscaped, "`", "\\`")
+	cfgJSONEscaped := strings.ReplaceAll(string(cfgJSON), "&", "&amp;")
+	cfgJSONEscaped = strings.ReplaceAll(cfgJSONEscaped, "<", "&lt;")
+	cfgJSONEscaped = strings.ReplaceAll(cfgJSONEscaped, ">", "&gt;")
+	cfgJSONEscaped = strings.ReplaceAll(cfgJSONEscaped, "</textarea>", "&lt;/textarea&gt;")
+	cfgJSONEscaped = strings.ReplaceAll(cfgJSONEscaped, "'", "&#39;")
+	cfgJSONEscaped = strings.ReplaceAll(cfgJSONEscaped, "\"", "&#34;")
+	cfgJSONEscaped = strings.ReplaceAll(cfgJSONEscaped, "`", "&#96;")
+	cfgJSONEscaped = strings.ReplaceAll(cfgJSONEscaped, "\r", "")
+	cfgJSONEscaped = strings.ReplaceAll(cfgJSONEscaped, "\n", "&#10;")
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(`<!DOCTYPE html>
@@ -1818,7 +1825,7 @@ textarea{
         <button class="btn btn-primary" onclick="saveConfig()">Salvar no Disco</button>
       </div>
       <div style="padding:0">
-        <textarea id="cfg-editor" spellcheck="false">` + cfgJSONEscaped + `</textarea>
+		<textarea id="cfg-editor" spellcheck="false">` + string(cfgJSON) + `</textarea>
       </div>
     </div>
   </div>
