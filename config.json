@@ -1,80 +1,117 @@
 {
   "port": 5571,
-  "serve_dir": "public",
-
+  "serve_dir": "www",
   "spa_fallback_enabled": true,
-  "dir_listing_enabled": false,
   "gzip_enabled": true,
-
-  "custom_404_page_path": "errors/404.html",
-  "log_file_path": "brhttp.log",
-
-  "inject_js_path": "",
-  "inject_css_path": "",
-
-  "watch_debounce_ms": 150,
-  "watch_exclude_dirs": ["node_modules", ".git", "dist", ".cache"],
-
+  "dashboard_enabled": true,
+  "metrics_enabled": false,
   "https_enabled": false,
   "https_port": 5572,
-  "https_cert_file": "",
-  "https_key_file": "",
-
-  "dashboard_enabled": true,
-
-  "api_token": "troque-por-um-token-secreto-forte",
-
+  "watch_debounce_ms": 100,
+  "watch_exclude_dirs": ["node_modules", ".git", "dist", "vendor"],
+  "api_token": "troque-por-token-secreto",
   "api_command_enabled": false,
-  "api_command_allow_list": ["npm", "git", "make"],
+  "api_command_allow_list": ["npm", "git", "make", "php", "python3"],
 
-  "notification_webhook_url": "",
+  "fastcgi": {
+    "enabled": false,
+    "address": "127.0.0.1:9000",
+    "extensions": [".php"],
+    "root": "",
+    "auto_start": false
+  },
+
+  "rate_limit": {
+    "enabled": false,
+    "requests_per_minute": 120,
+    "burst_size": 20
+  },
+
+  "dns": {
+    "enabled": false,
+    "port": 5353,
+    "domains": ["*.localhost", "*.dev.local"],
+    "upstream": "8.8.8.8:53"
+  },
+
+  "processes": [
+    {
+      "name": "meu-backend",
+      "command": "node",
+      "args": ["server.js"],
+      "dir": "./backend",
+      "auto_start": false,
+      "auto_restart": true,
+      "port": 3000
+    }
+  ],
+
+  "extra_ports": [
+    {
+      "port": 3001,
+      "dir": "./dist",
+      "https": false
+    }
+  ],
+
+  "hosts_entries": [
+    {
+      "ip": "127.0.0.1",
+      "domain": "meusite.local"
+    }
+  ],
 
   "proxy_rules": [
     {
       "path": "/api/",
-      "target": "http://localhost:3000"
+      "target": "http://localhost:3000",
+      "websocket_enabled": false
+    }
+  ],
+
+  "virtual_hosts": [
+    {
+      "host": "projeto-a.localhost",
+      "serve_dir": "./projetos/a",
+      "spa_fallback": true,
+      "runtime": "static"
     },
     {
-      "path": "/auth/",
-      "target": "http://localhost:4000"
+      "host": "projeto-b.localhost",
+      "serve_dir": "./projetos/b",
+      "spa_fallback": false,
+      "runtime": "php"
     }
   ],
 
-  "redirects": [
+  "mock_routes": [
     {
-      "from": "/docs-antigos",
-      "to": "/docs",
-      "code": 301
+      "path": "/api/user",
+      "method": "GET",
+      "body": "{\"id\":1,\"name\":\"Henrique\",\"email\":\"dev@brhttp.dev\"}",
+      "status_code": 200,
+      "delay_ms": 0
     }
   ],
-
-  "rewrites": [],
 
   "custom_headers": [
     {
       "path": "/api/",
       "headers": {
-        "X-Powered-By": "brhttp"
+        "X-Powered-By": "brhttp/4.0",
+        "X-Content-Type-Options": "nosniff"
       }
     }
   ],
 
+  "redirects": [],
+  "rewrites": [],
+
   "command_webhooks": [
     {
       "event": "server_start",
-      "command": "npm",
-      "args": ["run", "watch"]
-    },
-    {
-      "event": "file_change",
-      "path": "src/scss",
-      "command": "npm",
-      "args": ["run", "build-css"]
-    },
-    {
-      "event": "server_stop",
       "command": "echo",
-      "args": ["brhttp encerrado em {{timestamp}}"]
+      "args": ["brhttp v4 iniciado na porta {{port}}"]
     }
   ]
 }
