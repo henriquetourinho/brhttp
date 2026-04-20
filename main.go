@@ -4397,8 +4397,36 @@ func main() {
 
 	if cfg.HTTPSEnabled {
 		go func() {
+			httpsAddr := fmt.Sprintf(":%d", cfg.HTTPSPort)
 			log.Printf("  🔒  HTTPS ativo na porta :%d\n", cfg.HTTPSPort)
-			// Lógica de servidor aqui...
+
+			var tlsCfg *tls.Config
+
+			if cfg.HTTPSCertFile != "" && cfg.HTTPSKeyFile != "" {
+				// Usa certificado fornecido pelo usuário
+				cert, err := tls.LoadX509KeyPair(cfg.HTTPSCertFile, cfg.HTTPSKeyFile)
+				if err != nil {
+					log.Fatalf("Erro ao carregar certificado TLS: %v", err)
+				}
+				tlsCfg = &tls.Config{Certificates: []tls.Certificate{cert}}
+			} else {
+				// Gera certificado self-signed automaticamente
+				cert, err := generateSelfSignedCert()
+				if err != nil {
+					log.Fatalf("Erro ao gerar certificado self-signed: %v", err)
+				}
+				tlsCfg = &tls.Config{Certificates: []tls.Certificate{cert}}
+			}
+
+			httpsSrv := &http.Server{
+				Addr:      httpsAddr,
+				Handler:   mux,
+				TLSConfig: tlsCfg,
+			}
+
+			if err := httpsSrv.ListenAndServeTLS("", ""); err != nil {
+				log.Fatalf("Erro HTTPS: %v", err)
+			}
 		}()
 	}
 

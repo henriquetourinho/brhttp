@@ -1,0 +1,14 @@
+v4.5.0 - Versão Estável
+
+✅ Pronto para produção
+- HTTP/HTTPS
+- Dashboard web
+- Live Reload
+- Supervisor de processos
+- DNS local
+- Proxy reverso
+- Gzip automático
+
+Instalação:
+tar -xzf brhttp-linux-amd64.tar.gz
+./brhttp-linux-amd64 --port=5571
