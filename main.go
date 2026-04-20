@@ -173,9 +173,20 @@ type Config struct {
 	HostsEntries           []HostsEntry         `json:"hosts_entries"`
 	DNS                    DNSConfig            `json:"dns"`
 	ConfigFilePath         string               `json:"-"`
+	// v4.1 — Painel
+	DashboardUsername      string               `json:"dashboard_username"`
+	DashboardPassword      string               `json:"dashboard_password"`
 }
 
 // ─── Estado global ────────────────────────────────────────────────────────────
+
+// MetricPoint armazena um snapshot de métricas num instante
+type MetricPoint struct {
+	Time     int64   `json:"t"`
+	Requests int64   `json:"req"`
+	Errors   int64   `json:"err"`
+	Bytes    int64   `json:"bytes"`
+}
 
 var (
 	upgrader = websocket.Upgrader{
@@ -204,6 +215,14 @@ var (
 
 	// Process supervisor
 	supervisor *ProcessSupervisor
+
+	// Métricas históricas (últimos 60 pontos, 1 por segundo)
+	metricsHistory   []MetricPoint
+	metricsHistoryMu sync.Mutex
+
+	// Sessões do painel
+	panelSessions   = make(map[string]time.Time)
+	panelSessionsMu sync.Mutex
 )
 
 // ─── Rate Limiter ─────────────────────────────────────────────────────────────
@@ -392,6 +411,79 @@ func (s *ProcessSupervisor) StopAll() {
 	for _, name := range names {
 		s.Stop(name)
 	}
+}
+
+// ─── Persistência de config ───────────────────────────────────────────────────
+
+func saveConfig(cfg Config) error {
+	if cfg.ConfigFilePath == "" {
+		return fmt.Errorf("nenhum arquivo de config definido")
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(cfg.ConfigFilePath, data, 0644)
+}
+
+// ─── Sessões do painel ────────────────────────────────────────────────────────
+
+const sessionCookieName = "brhttp_session"
+const sessionTTL = 8 * time.Hour
+
+func generateToken() string {
+	b := make([]byte, 24)
+	rand.Read(b)
+	return fmt.Sprintf("%x", b)
+}
+
+func createSession() string {
+	token := generateToken()
+	panelSessionsMu.Lock()
+	panelSessions[token] = time.Now().Add(sessionTTL)
+	panelSessionsMu.Unlock()
+	return token
+}
+
+func isValidSession(r *http.Request) bool {
+	c, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return false
+	}
+	panelSessionsMu.Lock()
+	exp, ok := panelSessions[c.Value]
+	panelSessionsMu.Unlock()
+	return ok && time.Now().Before(exp)
+}
+
+func requirePanelAuth(cfg Config, w http.ResponseWriter, r *http.Request) bool {
+	if cfg.DashboardPassword == "" {
+		return true // sem senha configurada, acesso livre
+	}
+	return isValidSession(r)
+}
+
+// ─── Histórico de métricas ────────────────────────────────────────────────────
+
+func startMetricsHistory() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			p := MetricPoint{
+				Time:     time.Now().Unix(),
+				Requests: atomic.LoadInt64(&totalRequests),
+				Errors:   atomic.LoadInt64(&totalErrors),
+				Bytes:    atomic.LoadInt64(&totalBytes),
+			}
+			metricsHistoryMu.Lock()
+			metricsHistory = append(metricsHistory, p)
+			if len(metricsHistory) > 72 { // ~6 minutos
+				metricsHistory = metricsHistory[1:]
+			}
+			metricsHistoryMu.Unlock()
+		}
+	}()
 }
 
 // detectRuntime detecta qual runtime está disponível no sistema
@@ -951,12 +1043,89 @@ func metricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ─── Dashboard v4 ─────────────────────────────────────────────────────────────
+// ─── Dashboard v5 cPanel-like ─────────────────────────────────────────────────
+
+func loginPageHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>brhttp — Login</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#e6edf3;font-family:-apple-system,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.box{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:40px;width:340px;box-shadow:0 8px 32px #000a}
+h1{color:#58a6ff;font-size:1.4rem;margin-bottom:6px;text-align:center}
+.sub{color:#8b949e;font-size:12px;text-align:center;margin-bottom:28px}
+label{display:block;font-size:12px;color:#8b949e;margin-bottom:4px}
+input{width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:10px 12px;border-radius:6px;font-size:14px;margin-bottom:16px;outline:none;transition:.2s}
+input:focus{border-color:#58a6ff}
+button{width:100%;background:#1f6feb;color:#fff;border:none;border-radius:6px;padding:11px;font-size:14px;font-weight:600;cursor:pointer;transition:.2s}
+button:hover{background:#388bfd}
+.err{color:#f85149;font-size:12px;text-align:center;margin-top:10px;display:none}
+</style></head><body>
+<div class="box">
+  <h1>brhttp</h1>
+  <div class="sub">Painel de Gerenciamento</div>
+  <form method="POST" action="/___brhttp/login">
+    <label>Usuário</label>
+    <input name="username" type="text" autocomplete="username" required>
+    <label>Senha</label>
+    <input name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">Entrar</button>
+  </form>
+  <div class="err" id="err">` + func() string {
+		if r.URL.Query().Get("err") == "1" {
+			return "Usuário ou senha incorretos"
+		}
+		return ""
+	}() + `</div>
+  <script>var e=document.getElementById('err');if(e.textContent.trim())e.style.display='block'</script>
+</div></body></html>`))
+}
+
+func loginActionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Redirect(w, r, "/___brhttp/login", 302)
+		return
+	}
+	r.ParseForm()
+	user := r.FormValue("username")
+	pass := r.FormValue("password")
+
+	currentCfgMu.RLock()
+	cfg := currentCfg
+	currentCfgMu.RUnlock()
+
+	expectedUser := cfg.DashboardUsername
+	if expectedUser == "" {
+		expectedUser = "admin"
+	}
+
+	if user == expectedUser && pass == cfg.DashboardPassword {
+		token := createSession()
+		http.SetCookie(w, &http.Cookie{
+			Name:     sessionCookieName,
+			Value:    token,
+			Path:     "/___brhttp",
+			HttpOnly: true,
+			MaxAge:   int(sessionTTL.Seconds()),
+		})
+		http.Redirect(w, r, "/___brhttp", 302)
+	} else {
+		http.Redirect(w, r, "/___brhttp/login?err=1", 302)
+	}
+}
 
 func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	currentCfgMu.RLock()
 	cfg := currentCfg
 	currentCfgMu.RUnlock()
+
+	// Autenticação de painel
+	if cfg.DashboardPassword != "" && !isValidSession(r) {
+		http.Redirect(w, r, "/___brhttp/login", 302)
+		return
+	}
 
 	clientsMu.Lock()
 	cc := len(clients)
@@ -964,7 +1133,8 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 
 	reqs := atomic.LoadInt64(&totalRequests)
 	errs := atomic.LoadInt64(&totalErrors)
-	uptime := fmt.Sprintf("%s", time.Since(startTime).Round(time.Second))
+	byt := atomic.LoadInt64(&totalBytes)
+	uptime := time.Since(startTime).Round(time.Second).String()
 
 	logBufferMu.Lock()
 	logs := make([]string, len(logBuffer))
@@ -972,258 +1142,683 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	logBufferMu.Unlock()
 	logsJSON, _ := json.Marshal(logs)
 
-	// Status dos processos
-	var procRows string
-	if supervisor != nil {
-		for _, ps := range supervisor.Status() {
-			stateColor := "#f85149"
-			if ps.State == "running" {
-				stateColor = "#3fb950"
-			}
-			port := ""
-			if ps.Port > 0 {
-				port = strconv.Itoa(ps.Port)
-			}
-			procRows += `<tr>
-				<td>` + ps.Name + `</td>
-				<td style="color:` + stateColor + `">` + ps.State + `</td>
-				<td>` + strconv.Itoa(ps.PID) + `</td>
-				<td>` + port + `</td>
-				<td>` + ps.Uptime + `</td>
-				<td>
-					<button onclick="procAction('start','` + ps.Name + `')" style="font-size:10px;padding:2px 6px;cursor:pointer;background:transparent;border:1px solid #3fb950;color:#3fb950;border-radius:4px">start</button>
-					<button onclick="procAction('stop','` + ps.Name + `')" style="font-size:10px;padding:2px 6px;cursor:pointer;background:transparent;border:1px solid #f85149;color:#f85149;border-radius:4px">stop</button>
-					<button onclick="procAction('restart','` + ps.Name + `')" style="font-size:10px;padding:2px 6px;cursor:pointer;background:transparent;border:1px solid #58a6ff;color:#58a6ff;border-radius:4px">restart</button>
-				</td>
-			</tr>`
-		}
-	}
-	if procRows == "" {
-		procRows = `<tr><td colspan="6" style="color:#8b949e">Nenhum processo gerenciado</td></tr>`
-	}
+	cfgJSON, _ := json.MarshalIndent(cfg, "", "  ")
 
-	// Proxy rows
-	var proxyRows string
-	for _, p := range cfg.ProxyRules {
-		ws := ""
-		if p.WebSocketEnabled {
-			ws = " [WS]"
-		}
-		proxyRows += `<tr><td>` + p.Path + `</td><td>` + p.Target + ws + `</td>
-			<td><button onclick="delProxy('` + p.Path + `')" style="font-size:10px;padding:1px 6px;cursor:pointer;background:transparent;border:1px solid #f85149;color:#f85149;border-radius:3px">×</button></td></tr>`
-	}
-	if proxyRows == "" {
-		proxyRows = `<tr><td colspan="3" style="color:#8b949e">Nenhuma regra</td></tr>`
-	}
+	metricsHistoryMu.Lock()
+	histJSON, _ := json.Marshal(metricsHistory)
+	metricsHistoryMu.Unlock()
 
-	// Hosts entries
-	var hostsRows string
-	for _, h := range listHostsEntries() {
-		hostsRows += `<tr><td>` + h.Domain + `</td><td>` + h.IP + `</td>
-			<td><button onclick="delHost('` + h.Domain + `')" style="font-size:10px;padding:1px 6px;cursor:pointer;background:transparent;border:1px solid #f85149;color:#f85149;border-radius:3px">×</button></td></tr>`
-	}
-	if hostsRows == "" {
-		hostsRows = `<tr><td colspan="3" style="color:#8b949e">Nenhuma entrada gerenciada</td></tr>`
-	}
+	token := cfg.APIToken
 
-	badge := func(b bool, label string) string {
-		cls := ""; txt := "OFF"
-		if b { cls = " on"; txt = "ON" }
-		return `<span class="badge` + cls + `" onclick="toggleModule('` + strings.ToLower(strings.ReplaceAll(label, " ", "_")) + `',` + strconv.FormatBool(!b) + `)">` + label + ` ` + txt + `</span>`
-	}
-
-	httpsLink := ""
-	if cfg.HTTPSEnabled {
-		httpsLink = ` · <a href="https://localhost:` + strconv.Itoa(cfg.HTTPSPort) + `" style="color:#3fb950" target="_blank">https:` + strconv.Itoa(cfg.HTTPSPort) + `</a>`
-	}
-
-	html := `<!DOCTYPE html>
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(`<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>brhttp v` + Version + `</title>
+<title>brhttp v` + Version + ` — Painel</title>
 <style>
-:root{--bg:#0d1117;--s:#161b22;--b:#30363d;--t:#e6edf3;--m:#8b949e;--a:#58a6ff;--g:#3fb950;--r:#f85149}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+:root{--bg:#0d1117;--s1:#161b22;--s2:#21262d;--bd:#30363d;--t:#e6edf3;--m:#8b949e;--a:#58a6ff;--g:#3fb950;--r:#f85149;--y:#d29922;--pu:#bc8cff}
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--t);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',monospace;font-size:13px}
-header{background:var(--s);border-bottom:1px solid var(--b);padding:12px 20px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:10}
-h1{font-size:1rem;font-weight:700;color:var(--a)}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--g);animation:pulse 2s infinite;flex-shrink:0}
+body{background:var(--bg);color:var(--t);font-family:'Inter',sans-serif;font-size:13px;display:flex;min-height:100vh}
+/* Sidebar */
+.sidebar{width:220px;background:var(--s1);border-right:1px solid var(--bd);display:flex;flex-direction:column;position:fixed;top:0;left:0;height:100vh;z-index:100}
+.sidebar-logo{padding:18px 16px 14px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:10px}
+.sidebar-logo .dot{width:10px;height:10px;border-radius:50%;background:var(--g);box-shadow:0 0 8px var(--g);animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;padding:14px}
-.card{background:var(--s);border:1px solid var(--b);border-radius:8px;padding:12px}
-.label{font-size:10px;color:var(--m);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px}
-.val{font-size:1.5rem;font-weight:700}
-.sub{font-size:11px;color:var(--m);margin-top:2px}
-section{padding:0 14px 14px}
-section h2{font-size:10px;color:var(--m);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding-top:2px}
-.log-box{background:var(--s);border:1px solid var(--b);border-radius:8px;padding:10px;height:240px;overflow-y:auto;font-size:11px;line-height:1.5}
-.log-line{color:var(--m);border-bottom:1px solid #21262d;padding:1px 0}
-.log-line:last-child{color:var(--t)}
+.sidebar-logo span{font-weight:700;font-size:.95rem;color:var(--a)}
+.sidebar-logo small{color:var(--m);font-size:10px;margin-left:auto}
+.nav{flex:1;overflow-y:auto;padding:8px 0}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 16px;cursor:pointer;border-radius:0;color:var(--m);font-size:12.5px;font-weight:500;transition:.15s;border-left:3px solid transparent}
+.nav-item:hover{background:var(--s2);color:var(--t)}
+.nav-item.active{background:rgba(88,166,255,.1);color:var(--a);border-left-color:var(--a)}
+.nav-item .ico{font-size:15px;width:18px;text-align:center}
+.sidebar-footer{padding:12px 16px;border-top:1px solid var(--bd);font-size:11px;color:var(--m)}
+/* Main */
+.main{margin-left:220px;flex:1;display:flex;flex-direction:column;min-height:100vh}
+.topbar{background:var(--s1);border-bottom:1px solid var(--bd);padding:10px 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:50}
+.topbar h2{font-size:.95rem;font-weight:600;color:var(--t)}
+.topbar .sep{color:var(--bd)}
+.topbar .srv-link{color:var(--a);font-size:12px;text-decoration:none}
+.topbar .srv-link:hover{text-decoration:underline}
+.page{flex:1;padding:20px;display:none}
+.page.active{display:block}
+/* Cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:16px;position:relative;overflow:hidden}
+.card::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(88,166,255,.04),transparent);pointer-events:none}
+.card .lbl{font-size:10px;color:var(--m);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.card .val{font-size:1.8rem;font-weight:700;line-height:1}
+.card .sub{font-size:10px;color:var(--m);margin-top:5px}
+.card .ico-bg{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:2.2rem;opacity:.12}
+/* Chart */
+.chart-wrap{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:20px}
+.chart-wrap h3{font-size:11px;color:var(--m);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
+canvas{width:100%!important;height:140px!important}
+/* Tables */
+.section-box{background:var(--s1);border:1px solid var(--bd);border-radius:10px;margin-bottom:16px;overflow:hidden}
+.section-box .sec-head{padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between}
+.section-box .sec-head h3{font-size:12px;font-weight:600;color:var(--t)}
+.section-body{padding:0}
 table{width:100%;border-collapse:collapse}
-th{text-align:left;color:var(--m);font-weight:500;padding:5px 8px;border-bottom:1px solid var(--b);font-size:11px}
-td{padding:5px 8px;border-bottom:1px solid #21262d;font-size:12px}
-.actions{padding:0 14px 14px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.btn{background:transparent;color:var(--a);border:1px solid var(--a);border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer}
+th{text-align:left;color:var(--m);font-weight:500;padding:8px 14px;border-bottom:1px solid var(--bd);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+td{padding:9px 14px;border-bottom:1px solid var(--s2);font-size:12px}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.02)}
+/* Badges */
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.badge-green{background:rgba(63,185,80,.15);color:var(--g);border:1px solid rgba(63,185,80,.3)}
+.badge-red{background:rgba(248,81,73,.15);color:var(--r);border:1px solid rgba(248,81,73,.3)}
+.badge-blue{background:rgba(88,166,255,.15);color:var(--a);border:1px solid rgba(88,166,255,.3)}
+/* Toggle pills */
+.toggle-grid{display:flex;flex-wrap:wrap;gap:8px;padding:16px}
+.toggle-pill{display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--bd);border-radius:8px;cursor:pointer;transition:.2s;background:var(--s2)}
+.toggle-pill:hover{border-color:var(--a)}
+.toggle-pill.on{border-color:rgba(63,185,80,.4);background:rgba(63,185,80,.07)}
+.toggle-pill .tname{font-size:12px;font-weight:500}
+.switch{width:34px;height:18px;border-radius:9px;background:var(--bd);position:relative;transition:.2s;cursor:pointer;flex-shrink:0}
+.switch::after{content:'';position:absolute;width:12px;height:12px;background:#fff;border-radius:50%;top:3px;left:3px;transition:.2s}
+.toggle-pill.on .switch{background:var(--g)}
+.toggle-pill.on .switch::after{left:19px}
+/* Buttons */
+.btn{background:transparent;border:1px solid var(--a);color:var(--a);border-radius:6px;padding:6px 12px;font-size:11px;font-weight:500;cursor:pointer;transition:.15s;font-family:inherit}
 .btn:hover{background:var(--a);color:#000}
-.btn.g{color:var(--g);border-color:var(--g)}.btn.g:hover{background:var(--g);color:#000}
-.btn.r{color:var(--r);border-color:var(--r)}.btn.r:hover{background:var(--r);color:#fff}
-.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;margin:2px;border:1px solid var(--b);color:var(--m);cursor:pointer;user-select:none}
-.badge:hover{border-color:var(--a)}
-.badge.on{border-color:#3fb95055;background:#3fb95015;color:var(--g)}
-#flash{font-size:11px;color:var(--g);display:none;margin-left:6px}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 14px 14px}
-@media(max-width:600px){.two{grid-template-columns:1fr}}
-input[type=text]{background:var(--s);border:1px solid var(--b);color:var(--t);padding:4px 8px;border-radius:4px;font-size:12px;width:100%}
-.form-row{display:flex;gap:6px;margin-bottom:6px}
-.form-row input{flex:1}
+.btn-g{border-color:var(--g);color:var(--g)}.btn-g:hover{background:var(--g);color:#000}
+.btn-r{border-color:var(--r);color:var(--r)}.btn-r:hover{background:var(--r);color:#fff}
+.btn-sm{padding:3px 8px;font-size:10px}
+/* Forms */
+.form-row{display:flex;gap:8px;align-items:center;padding:12px 14px;border-top:1px solid var(--bd);flex-wrap:wrap}
+input[type=text],input[type=password],input[type=number],select,textarea{background:var(--s2);border:1px solid var(--bd);color:var(--t);padding:7px 10px;border-radius:6px;font-size:12px;font-family:inherit;outline:none;transition:.15s}
+input[type=text]:focus,input[type=number]:focus,select:focus,textarea:focus{border-color:var(--a)}
+input[type=text]{min-width:120px}
+textarea{width:100%;min-height:380px;font-family:'Courier New',monospace;font-size:12px;resize:vertical;line-height:1.5}
+/* Log box */
+.log-box{background:#0a0e14;border-radius:0 0 10px 10px;padding:10px;height:380px;overflow-y:auto;font-size:11px;line-height:1.6;font-family:'Courier New',monospace}
+.log-line{color:var(--m);padding:1px 0;border-bottom:1px solid #1a1f27}
+.log-line.err{color:var(--r)}
+.log-line.ok{color:var(--g)}
+/* Toast */
+#toast-container{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:9999}
+.toast{background:var(--s1);border:1px solid var(--bd);border-radius:8px;padding:10px 16px;font-size:12px;box-shadow:0 4px 20px #0008;display:flex;align-items:center;gap:8px;animation:slideIn .3s ease;max-width:280px}
+.toast.ok{border-left:3px solid var(--g)}
+.toast.err{border-left:3px solid var(--r)}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+/* Responsive */
+@media(max-width:700px){.sidebar{width:60px}.sidebar-logo span,.sidebar-logo small,.nav-item span{display:none}.main{margin-left:60px}}
 </style>
 </head>
 <body>
-<header>
-  <div class="dot"></div>
-  <h1>brhttp v` + Version + `</h1>
-  <span style="color:var(--m);margin-left:auto;font-size:12px">
-    <a href="http://localhost:` + strconv.Itoa(cfg.Port) + `" style="color:var(--a)" target="_blank">:` + strconv.Itoa(cfg.Port) + `</a>` + httpsLink + `
-  </span>
-</header>
 
-<div class="grid">
-  <div class="card"><div class="label">Status</div><div class="val" style="font-size:1rem;color:var(--g)">● Online</div><div class="sub" id="up">` + uptime + `</div></div>
-  <div class="card"><div class="label">Requisições</div><div class="val" id="req">` + strconv.FormatInt(reqs, 10) + `</div><div class="sub">total</div></div>
-  <div class="card"><div class="label">Erros</div><div class="val" id="err" style="color:var(--r)">` + strconv.FormatInt(errs, 10) + `</div><div class="sub">4xx/5xx</div></div>
-  <div class="card"><div class="label">WebSocket</div><div class="val" id="ws">` + strconv.Itoa(cc) + `</div><div class="sub">clientes</div></div>
-</div>
-
-<section>
-  <h2>Módulos — clique para ligar/desligar</h2>
-  ` + badge(cfg.GzipEnabled, "Gzip") +
-		badge(cfg.BrotliEnabled, "Brotli") +
-		badge(cfg.SPAFallbackEnabled, "SPA") +
-		badge(cfg.FastCGI.Enabled, "FastCGI/PHP") +
-		badge(cfg.RateLimit.Enabled, "Rate Limit") +
-		badge(cfg.ETagEnabled, "ETag") +
-		badge(cfg.CacheModeEnabled, "Cache") +
-		badge(cfg.MetricsEnabled, "Métricas") +
-		badge(cfg.HTTPSEnabled, "HTTPS") +
-		badge(cfg.DNS.Enabled, "DNS local") + `
-</section>
-
-<div class="actions">
-  <button class="btn" onclick="act('reload')">⚡ Live Reload</button>
-  <button class="btn" onclick="act('reload-config')">🔄 Config</button>
-  <a href="/metrics" target="_blank"><button class="btn">📊 Metrics</button></a>
-  <span id="flash">✓</span>
-</div>
-
-<section>
-  <h2>Processos gerenciados (` + strconv.Itoa(len(supervisor.Status())) + `)</h2>
-  <table>
-    <tr><th>Nome</th><th>Estado</th><th>PID</th><th>Porta</th><th>Uptime</th><th>Ações</th></tr>
-    ` + procRows + `
-  </table>
-  <div style="margin-top:8px;display:flex;gap:6px">
-    <button class="btn g" onclick="autoDetect()">+ Auto-detectar PHP/Python/Node</button>
+<div class="sidebar">
+  <div class="sidebar-logo">
+    <div class="dot"></div>
+    <span>brhttp</span>
+    <small>v` + Version + `</small>
   </div>
-</section>
-
-<div class="two">
-  <section style="padding:0">
-    <h2 style="margin-bottom:8px">Proxy rules (` + strconv.Itoa(len(cfg.ProxyRules)) + `)</h2>
-    <table><tr><th>Path</th><th>Target</th><th></th></tr>` + proxyRows + `</table>
-    <div class="form-row" style="margin-top:8px">
-      <input type="text" id="proxy-path" placeholder="/api/">
-      <input type="text" id="proxy-target" placeholder="http://localhost:3000">
-      <button class="btn g" onclick="addProxy()">+</button>
-    </div>
-  </section>
-
-  <section style="padding:0">
-    <h2 style="margin-bottom:8px">DNS / /etc/hosts</h2>
-    <table><tr><th>Domínio</th><th>IP</th><th></th></tr>` + hostsRows + `</table>
-    <div class="form-row" style="margin-top:8px">
-      <input type="text" id="host-domain" placeholder="meusite.local">
-      <input type="text" id="host-ip" placeholder="127.0.0.1" style="max-width:120px">
-      <button class="btn g" onclick="addHost()">+</button>
-    </div>
-  </section>
+  <nav class="nav">
+    <div class="nav-item active" onclick="showTab('dashboard')" id="nav-dashboard"><span class="ico">📊</span><span>Dashboard</span></div>
+    <div class="nav-item" onclick="showTab('vhosts')" id="nav-vhosts"><span class="ico">🌐</span><span>Virtual Hosts</span></div>
+    <div class="nav-item" onclick="showTab('proxy')" id="nav-proxy"><span class="ico">🔀</span><span>Proxy Rules</span></div>
+    <div class="nav-item" onclick="showTab('redirects')" id="nav-redirects"><span class="ico">↩️</span><span>Redirects</span></div>
+    <div class="nav-item" onclick="showTab('mocks')" id="nav-mocks"><span class="ico">🧪</span><span>Mock Routes</span></div>
+    <div class="nav-item" onclick="showTab('processes')" id="nav-processes"><span class="ico">⚙️</span><span>Processos</span></div>
+    <div class="nav-item" onclick="showTab('dns')" id="nav-dns"><span class="ico">🌍</span><span>DNS &amp; Hosts</span></div>
+    <div class="nav-item" onclick="showTab('modules')" id="nav-modules"><span class="ico">🔌</span><span>Módulos</span></div>
+    <div class="nav-item" onclick="showTab('logs')" id="nav-logs"><span class="ico">📋</span><span>Logs</span></div>
+    <div class="nav-item" onclick="showTab('config')" id="nav-config"><span class="ico">🗂️</span><span>Config JSON</span></div>
+  </nav>
+  <div class="sidebar-footer">
+    <a href="http://localhost:` + strconv.Itoa(cfg.Port) + `" target="_blank" style="color:var(--a);text-decoration:none">:` + strconv.Itoa(cfg.Port) + ` ↗</a>
+    &nbsp;·&nbsp; <a href="/___brhttp/logout" style="color:var(--m);text-decoration:none">Sair</a>
+  </div>
 </div>
 
-<section>
-  <h2>Log em tempo real</h2>
-  <div class="log-box" id="logbox"></div>
-</section>
+<div class="main">
+  <div class="topbar">
+    <h2 id="page-title">Dashboard</h2>
+    <span class="sep">·</span>
+    <a class="srv-link" href="http://localhost:` + strconv.Itoa(cfg.Port) + `" target="_blank">localhost:` + strconv.Itoa(cfg.Port) + `</a>
+  </div>
+
+  <!-- ── DASHBOARD ── -->
+  <div class="page active" id="page-dashboard">
+    <div class="cards">
+      <div class="card"><div class="lbl">Status</div><div class="val" style="font-size:1.1rem;color:var(--g)">● Online</div><div class="sub" id="card-up">` + uptime + `</div><div class="ico-bg">🚀</div></div>
+      <div class="card"><div class="lbl">Requisições</div><div class="val" id="card-req">` + strconv.FormatInt(reqs, 10) + `</div><div class="sub">total</div><div class="ico-bg">📥</div></div>
+      <div class="card"><div class="lbl">Erros 4xx/5xx</div><div class="val" id="card-err" style="color:var(--r)">` + strconv.FormatInt(errs, 10) + `</div><div class="sub">total</div><div class="ico-bg">⚠️</div></div>
+      <div class="card"><div class="lbl">Transferido</div><div class="val" id="card-bytes" style="font-size:1.1rem;color:var(--pu)">` + fmtBytes(byt) + `</div><div class="sub">total</div><div class="ico-bg">💾</div></div>
+      <div class="card"><div class="lbl">WebSocket</div><div class="val" id="card-ws">` + strconv.Itoa(cc) + `</div><div class="sub">clientes</div><div class="ico-bg">🔌</div></div>
+    </div>
+    <div class="chart-wrap">
+      <h3>Requisições por intervalo (5s)</h3>
+      <canvas id="chart-req"></canvas>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" onclick="api('reload','POST').then(function(){toast('Live reload disparado','ok')})">⚡ Live Reload</button>
+      <button class="btn" onclick="api('reload-config','POST').then(function(){toast('Config recarregada','ok')})">🔄 Recarregar Config</button>
+      <a href="/metrics" target="_blank"><button class="btn">📈 Métricas Prometheus</button></a>
+    </div>
+  </div>
+
+  <!-- ── VIRTUAL HOSTS ── -->
+  <div class="page" id="page-vhosts">
+    <div class="section-box">
+      <div class="sec-head"><h3>Virtual Hosts</h3></div>
+      <div class="section-body">
+        <table><thead><tr><th>Host</th><th>Diretório</th><th>Runtime</th><th>SPA</th><th></th></tr></thead>
+        <tbody id="vhosts-body"></tbody></table>
+        <div class="form-row">
+          <input type="text" id="vh-host" placeholder="meusite.local" style="flex:2">
+          <input type="text" id="vh-dir" placeholder="./www" style="flex:2">
+          <select id="vh-runtime"><option value="static">static</option><option value="php">php</option><option value="node">node</option><option value="python">python</option></select>
+          <label style="font-size:11px;color:var(--m);display:flex;align-items:center;gap:4px"><input type="checkbox" id="vh-spa"> SPA</label>
+          <button class="btn btn-g" onclick="addVHost()">+ Adicionar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── PROXY ── -->
+  <div class="page" id="page-proxy">
+    <div class="section-box">
+      <div class="sec-head"><h3>Proxy Rules</h3></div>
+      <div class="section-body">
+        <table><thead><tr><th>Path</th><th>Target</th><th>WebSocket</th><th></th></tr></thead>
+        <tbody id="proxy-body"></tbody></table>
+        <div class="form-row">
+          <input type="text" id="px-path" placeholder="/api/" style="flex:1">
+          <input type="text" id="px-target" placeholder="http://localhost:3000" style="flex:2">
+          <label style="font-size:11px;color:var(--m);display:flex;align-items:center;gap:4px"><input type="checkbox" id="px-ws"> WS</label>
+          <button class="btn btn-g" onclick="addProxy()">+ Adicionar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── REDIRECTS ── -->
+  <div class="page" id="page-redirects">
+    <div class="section-box" style="margin-bottom:16px">
+      <div class="sec-head"><h3>Redirects</h3></div>
+      <div class="section-body">
+        <table><thead><tr><th>De</th><th>Para</th><th>Código</th><th></th></tr></thead>
+        <tbody id="redirects-body"></tbody></table>
+        <div class="form-row">
+          <input type="text" id="rd-from" placeholder="/old" style="flex:1">
+          <input type="text" id="rd-to" placeholder="/new" style="flex:1">
+          <input type="number" id="rd-code" placeholder="301" style="width:70px" value="301">
+          <button class="btn btn-g" onclick="addRedirect()">+ Adicionar</button>
+        </div>
+      </div>
+    </div>
+    <div class="section-box">
+      <div class="sec-head"><h3>Rewrites</h3></div>
+      <div class="section-body">
+        <table><thead><tr><th>De</th><th>Para</th><th></th></tr></thead>
+        <tbody id="rewrites-body"></tbody></table>
+        <div class="form-row">
+          <input type="text" id="rw-from" placeholder="/antigo" style="flex:1">
+          <input type="text" id="rw-to" placeholder="/novo" style="flex:1">
+          <button class="btn btn-g" onclick="addRewrite()">+ Adicionar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MOCK ROUTES ── -->
+  <div class="page" id="page-mocks">
+    <div class="section-box">
+      <div class="sec-head"><h3>Mock Routes</h3></div>
+      <div class="section-body">
+        <table><thead><tr><th>Path</th><th>Método</th><th>Status</th><th>Body</th><th></th></tr></thead>
+        <tbody id="mocks-body"></tbody></table>
+        <div class="form-row">
+          <input type="text" id="mk-path" placeholder="/api/test" style="flex:1">
+          <select id="mk-method"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select>
+          <input type="number" id="mk-code" placeholder="200" style="width:70px" value="200">
+          <input type="text" id="mk-body" placeholder='{"ok":true}' style="flex:2">
+          <button class="btn btn-g" onclick="addMock()">+ Adicionar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── PROCESSOS ── -->
+  <div class="page" id="page-processes">
+    <div class="section-box">
+      <div class="sec-head">
+        <h3>Processos Gerenciados</h3>
+        <button class="btn btn-sm btn-g" onclick="autoDetect()">🔍 Auto-detectar</button>
+      </div>
+      <div class="section-body">
+        <table><thead><tr><th>Nome</th><th>Estado</th><th>PID</th><th>Porta</th><th>Uptime</th><th>Ações</th></tr></thead>
+        <tbody id="proc-body"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── DNS ── -->
+  <div class="page" id="page-dns">
+    <div class="section-box">
+      <div class="sec-head"><h3>/etc/hosts gerenciado</h3></div>
+      <div class="section-body">
+        <table><thead><tr><th>Domínio</th><th>IP</th><th></th></tr></thead>
+        <tbody id="hosts-body"></tbody></table>
+        <div class="form-row">
+          <input type="text" id="h-domain" placeholder="meusite.local" style="flex:2">
+          <input type="text" id="h-ip" placeholder="127.0.0.1" style="flex:1">
+          <button class="btn btn-g" onclick="addHost()">+ Adicionar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MÓDULOS ── -->
+  <div class="page" id="page-modules">
+    <div class="section-box">
+      <div class="sec-head"><h3>Módulos — clique para ligar/desligar (sem reiniciar)</h3></div>
+      <div class="toggle-grid" id="toggle-grid">
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LOGS ── -->
+  <div class="page" id="page-logs">
+    <div class="section-box">
+      <div class="sec-head">
+        <h3>Log em Tempo Real</h3>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" id="log-filter" placeholder="Filtrar..." style="width:140px" oninput="renderLogs()">
+          <button class="btn btn-sm" onclick="clearLogs()">Limpar</button>
+          <a href="/___brhttp/logs/download"><button class="btn btn-sm">⬇ Download</button></a>
+        </div>
+      </div>
+      <div class="log-box" id="logbox"></div>
+    </div>
+  </div>
+
+  <!-- ── CONFIG JSON ── -->
+  <div class="page" id="page-config">
+    <div class="section-box">
+      <div class="sec-head">
+        <h3>config.json — Editor</h3>
+        <button class="btn btn-g" onclick="saveConfig()">💾 Salvar no Disco</button>
+      </div>
+      <div style="padding:0">
+        <textarea id="cfg-editor" spellcheck="false">` + string(cfgJSON) + `</textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
 
 <script>
+var TOKEN = '` + token + `';
 var logs = ` + string(logsJSON) + `;
-var box = document.getElementById('logbox');
-var TOKEN = '` + cfg.APIToken + `';
-function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function render(){box.innerHTML=logs.map(function(l){return '<div class="log-line">'+esc(l)+'</div>'}).join('');box.scrollTop=box.scrollHeight}
-render();
+var hist = ` + string(histJSON) + ` || [];
 
+// ── API helpers ──
+function api(ep, method, body) {
+  method = method || 'POST';
+  var opts = {method:method, headers:{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'}};
+  if(body) opts.body = JSON.stringify(body);
+  return fetch('/api/'+ep, opts);
+}
+function apiGet(ep) {
+  return fetch('/api/'+ep, {headers:{'Authorization':'Bearer '+TOKEN}});
+}
+
+// ── Toast ──
+function toast(msg, type) {
+  var c = document.getElementById('toast-container');
+  var t = document.createElement('div');
+  t.className = 'toast '+(type||'ok');
+  t.innerHTML = (type==='err'?'❌':'✅') + ' ' + msg;
+  c.appendChild(t);
+  setTimeout(function(){t.remove()},3500);
+}
+
+// ── Tab navigation ──
+function showTab(name) {
+  document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
+  document.querySelectorAll('.nav-item').forEach(function(n){n.classList.remove('active')});
+  document.getElementById('page-'+name).classList.add('active');
+  document.getElementById('nav-'+name).classList.add('active');
+  var titles = {dashboard:'Dashboard',vhosts:'Virtual Hosts',proxy:'Proxy Rules',redirects:'Redirects & Rewrites',mocks:'Mock Routes',processes:'Processos',dns:'DNS & /etc/hosts',modules:'Módulos',logs:'Logs',config:'Config JSON'};
+  document.getElementById('page-title').textContent = titles[name]||name;
+  if(name==='vhosts') loadVHosts();
+  if(name==='proxy') loadProxy();
+  if(name==='redirects') loadRedirects();
+  if(name==='mocks') loadMocks();
+  if(name==='processes') loadProcesses();
+  if(name==='dns') loadHosts();
+  if(name==='modules') loadModules();
+  if(name==='logs') renderLogs();
+}
+
+// ── Escape ──
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+// ── Logs ──
+function renderLogs() {
+  var f = (document.getElementById('log-filter').value||'').toLowerCase();
+  var box = document.getElementById('logbox');
+  box.innerHTML = logs.filter(function(l){return !f||l.toLowerCase().includes(f)})
+    .map(function(l){
+      var cls='log-line';
+      if(l.includes(' 4') || l.includes(' 5') || l.toLowerCase().includes('erro')) cls+=' err';
+      if(l.includes(' 2') || l.toLowerCase().includes('ok')) cls+=' ok';
+      return '<div class="'+cls+'">'+esc(l)+'</div>';
+    }).join('');
+  box.scrollTop = box.scrollHeight;
+}
+function clearLogs(){logs=[];renderLogs();}
+renderLogs();
+
+// ── WebSocket ──
 var ws = new WebSocket('ws://'+location.host+'/ws');
 ws.onmessage = function(e){
   var m = JSON.parse(e.data);
-  if(m.type==='log'){logs.push(m.line);if(logs.length>500)logs=logs.slice(-500);render();}
+  if(m.type==='log'){logs.push(m.line);if(logs.length>600)logs=logs.slice(-600);if(document.getElementById('page-logs').classList.contains('active'))renderLogs();}
 };
-ws.onclose = function(){setTimeout(function(){location.reload()},2000)};
+ws.onclose = function(){setTimeout(function(){location.reload()},3000)};
 
-function flash(msg){var f=document.getElementById('flash');f.textContent=msg||'✓';f.style.display='inline';setTimeout(function(){f.style.display='none'},2000)}
-function api(path,body){
-  return fetch(path,{method:'POST',headers:{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
-}
-function act(ep){api('/api/'+ep).then(function(r){if(r.ok)flash()})}
-
-function toggleModule(mod, val){
-  api('/api/set',{module:mod,value:val}).then(function(r){if(r.ok){flash('✓ '+mod+' '+(val?'ON':'OFF'));setTimeout(function(){location.reload()},500)}});
-}
-
-function procAction(action, name){
-  api('/api/process/'+action,{name:name}).then(function(r){if(r.ok){flash('✓ '+name+' '+action);setTimeout(function(){location.reload()},1000)}});
-}
-
-function autoDetect(){
-  api('/api/process/autodetect').then(function(r){if(r.ok){flash('✓ detectado!');setTimeout(function(){location.reload()},1000)}});
-}
-
-function addProxy(){
-  var path = document.getElementById('proxy-path').value;
-  var target = document.getElementById('proxy-target').value;
-  if(!path||!target)return;
-  api('/api/config/proxy/add',{path:path,target:target}).then(function(r){if(r.ok){flash('✓ proxy adicionado');setTimeout(function(){location.reload()},500)}});
-}
-
-function delProxy(path){
-  api('/api/config/proxy/delete',{path:path}).then(function(r){if(r.ok){flash('✓ removido');setTimeout(function(){location.reload()},500)}});
-}
-
-function addHost(){
-  var domain = document.getElementById('host-domain').value;
-  var ip = document.getElementById('host-ip').value || '127.0.0.1';
-  if(!domain)return;
-  api('/api/hosts/add',{domain:domain,ip:ip}).then(function(r){r.text().then(function(t){flash(r.ok?'✓ adicionado':'Erro: '+t);if(r.ok)setTimeout(function(){location.reload()},500)})});
-}
-
-function delHost(domain){
-  api('/api/hosts/delete',{domain:domain}).then(function(r){if(r.ok){flash('✓ removido');setTimeout(function(){location.reload()},500)}});
-}
-
-setInterval(function(){
+// ── Metrics polling ──
+function fmtBytes(b){if(b<1024)return b+'B';if(b<1048576)return (b/1024).toFixed(1)+'KB';return (b/1048576).toFixed(1)+'MB'}
+function pollMetrics(){
   fetch('/___brhttp/metrics-json').then(function(r){return r.json()}).then(function(d){
-    document.getElementById('req').textContent=d.requests;
-    document.getElementById('err').textContent=d.errors;
-    document.getElementById('ws').textContent=d.ws_clients;
-    document.getElementById('up').textContent=d.uptime;
+    document.getElementById('card-req').textContent=d.requests;
+    document.getElementById('card-err').textContent=d.errors;
+    document.getElementById('card-ws').textContent=d.ws_clients;
+    document.getElementById('card-up').textContent=d.uptime;
+    document.getElementById('card-bytes').textContent=fmtBytes(d.bytes||0);
   });
-},3000);
+  apiGet('metrics/history').then(function(r){return r.json()}).then(function(h){
+    if(h&&h.length) drawChart(h);
+  });
+}
+setInterval(pollMetrics,4000);
+
+// ── Chart ──
+var chartCtx = document.getElementById('chart-req').getContext('2d');
+var chartData = {labels:[],reqs:[],errs:[]};
+function drawChart(h){
+  var canvas = document.getElementById('chart-req');
+  var ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth;
+  canvas.height = 140;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(!h||h.length<2) return;
+  var reqs=h.map(function(p,i){return i===0?0:p.req-h[i-1].req});
+  var errs=h.map(function(p,i){return i===0?0:p.err-h[i-1].err});
+  reqs.shift(); errs.shift();
+  var maxR=Math.max.apply(null,reqs)||1;
+  var w=canvas.width, ht=canvas.height, pad=8;
+  var step=Math.max(1,(w-pad*2)/(reqs.length-1||1));
+  function drawLine(data,color,max){
+    ctx.beginPath();
+    ctx.strokeStyle=color;
+    ctx.lineWidth=2;
+    ctx.lineCap='round';
+    data.forEach(function(v,i){
+      var x=pad+i*step, y=ht-pad-(v/max)*(ht-pad*2);
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+    ctx.lineTo(pad+(data.length-1)*step,ht-pad);
+    ctx.lineTo(pad,ht-pad);
+    ctx.closePath();
+    ctx.fillStyle=color+'22';
+    ctx.fill();
+  }
+  drawLine(reqs,'#58a6ff',maxR);
+  drawLine(errs,'#f85149',Math.max.apply(null,errs)||1);
+}
+if(hist&&hist.length) drawChart(hist);
+
+// ── Virtual Hosts ──
+function loadVHosts(){
+  apiGet('virtual-hosts/list').then(function(r){return r.json()}).then(function(d){
+    var t=document.getElementById('vhosts-body');
+    t.innerHTML=(d&&d.length)?d.map(function(v){
+      return '<tr><td>'+esc(v.host)+'</td><td>'+esc(v.serve_dir)+'</td><td><span class="badge badge-blue">'+esc(v.runtime||'static')+'</span></td>'
+        +'<td>'+(v.spa_fallback?'<span class="badge badge-green">SIM</span>':'—')+'</td>'
+        +'<td><button class="btn btn-r btn-sm" onclick="delVHost(\''+esc(v.host)+'\')">Remover</button></td></tr>';
+    }).join(''):'<tr><td colspan="5" style="color:var(--m);text-align:center">Nenhum virtual host</td></tr>';
+  });
+}
+function addVHost(){
+  var h=document.getElementById('vh-host').value;
+  var d=document.getElementById('vh-dir').value;
+  var rt=document.getElementById('vh-runtime').value;
+  var spa=document.getElementById('vh-spa').checked;
+  if(!h||!d)return;
+  api('virtual-hosts/add','POST',{host:h,serve_dir:d,runtime:rt,spa_fallback:spa}).then(function(r){
+    if(r.ok){toast('Virtual host adicionado');loadVHosts();}else{r.text().then(function(t){toast(t,'err')});}
+  });
+}
+function delVHost(host){
+  api('virtual-hosts/delete','POST',{host:host}).then(function(r){if(r.ok){toast('Removido');loadVHosts();}});
+}
+
+// ── Proxy ──
+function loadProxy(){
+  apiGet('config').then(function(r){return r.json()}).then(function(d){
+    var t=document.getElementById('proxy-body');
+    var rules=d.proxy_rules||[];
+    t.innerHTML=rules.length?rules.map(function(p){
+      return '<tr><td>'+esc(p.path)+'</td><td>'+esc(p.target)+'</td>'
+        +'<td>'+(p.websocket_enabled?'<span class="badge badge-blue">WS</span>':'—')+'</td>'
+        +'<td><button class="btn btn-r btn-sm" onclick="delProxy(\''+esc(p.path)+'\')">Remover</button></td></tr>';
+    }).join(''):'<tr><td colspan="4" style="color:var(--m);text-align:center">Nenhuma regra</td></tr>';
+  });
+}
+function addProxy(){
+  var path=document.getElementById('px-path').value;
+  var target=document.getElementById('px-target').value;
+  var ws=document.getElementById('px-ws').checked;
+  if(!path||!target)return;
+  api('config/proxy/add','POST',{path:path,target:target,websocket_enabled:ws}).then(function(r){
+    if(r.ok){toast('Proxy adicionado');loadProxy();}else{r.text().then(function(t){toast(t,'err')});}
+  });
+}
+function delProxy(path){
+  api('config/proxy/delete','POST',{path:path}).then(function(r){if(r.ok){toast('Removido');loadProxy();}});
+}
+
+// ── Redirects ──
+function loadRedirects(){
+  apiGet('config').then(function(r){return r.json()}).then(function(d){
+    var rd=document.getElementById('redirects-body');
+    var rds=d.redirects||[];
+    rd.innerHTML=rds.length?rds.map(function(r){
+      return '<tr><td>'+esc(r.from)+'</td><td>'+esc(r.to)+'</td><td>'+r.code+'</td>'
+        +'<td><button class="btn btn-r btn-sm" onclick="delRedirect(\''+esc(r.from)+'\')">Remover</button></td></tr>';
+    }).join(''):'<tr><td colspan="4" style="color:var(--m);text-align:center">Nenhum redirect</td></tr>';
+    var rw=document.getElementById('rewrites-body');
+    var rws=d.rewrites||[];
+    rw.innerHTML=rws.length?rws.map(function(r){
+      return '<tr><td>'+esc(r.from)+'</td><td>'+esc(r.to)+'</td>'
+        +'<td><button class="btn btn-r btn-sm" onclick="delRewrite(\''+esc(r.from)+'\')">Remover</button></td></tr>';
+    }).join(''):'<tr><td colspan="3" style="color:var(--m);text-align:center">Nenhum rewrite</td></tr>';
+  });
+}
+function addRedirect(){
+  var from=document.getElementById('rd-from').value;
+  var to=document.getElementById('rd-to').value;
+  var code=parseInt(document.getElementById('rd-code').value)||301;
+  if(!from||!to)return;
+  api('redirects/add','POST',{from:from,to:to,code:code}).then(function(r){if(r.ok){toast('Redirect adicionado');loadRedirects();}});
+}
+function delRedirect(from){api('redirects/delete','POST',{from:from}).then(function(r){if(r.ok){toast('Removido');loadRedirects();}});}
+function addRewrite(){
+  var from=document.getElementById('rw-from').value;
+  var to=document.getElementById('rw-to').value;
+  if(!from||!to)return;
+  api('rewrites/add','POST',{from:from,to:to}).then(function(r){if(r.ok){toast('Rewrite adicionado');loadRedirects();}});
+}
+function delRewrite(from){api('rewrites/delete','POST',{from:from}).then(function(r){if(r.ok){toast('Removido');loadRedirects();}});}
+
+// ── Mocks ──
+function loadMocks(){
+  apiGet('config').then(function(r){return r.json()}).then(function(d){
+    var t=document.getElementById('mocks-body');
+    var mks=d.mock_routes||[];
+    t.innerHTML=mks.length?mks.map(function(m){
+      return '<tr><td>'+esc(m.path)+'</td><td><span class="badge badge-blue">'+esc(m.method||'GET')+'</span></td>'
+        +'<td>'+m.status_code+'</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(m.body)+'</td>'
+        +'<td><button class="btn btn-r btn-sm" onclick="delMock(\''+esc(m.path)+'\')">Remover</button></td></tr>';
+    }).join(''):'<tr><td colspan="5" style="color:var(--m);text-align:center">Nenhuma mock route</td></tr>';
+  });
+}
+function addMock(){
+  var path=document.getElementById('mk-path').value;
+  var method=document.getElementById('mk-method').value;
+  var code=parseInt(document.getElementById('mk-code').value)||200;
+  var body=document.getElementById('mk-body').value;
+  if(!path)return;
+  api('mock-routes/add','POST',{path:path,method:method,status_code:code,body:body}).then(function(r){if(r.ok){toast('Mock criado');loadMocks();}});
+}
+function delMock(path){api('mock-routes/delete','POST',{path:path}).then(function(r){if(r.ok){toast('Removido');loadMocks();}});}
+
+// ── Processos ──
+function loadProcesses(){
+  apiGet('process/status').then(function(r){return r.json()}).then(function(d){
+    var t=document.getElementById('proc-body');
+    t.innerHTML=(d&&d.length)?d.map(function(p){
+      var sc=p.state==='running'?'badge-green':'badge-red';
+      return '<tr><td>'+esc(p.name)+'</td><td><span class="badge '+sc+'">'+p.state+'</span></td>'
+        +'<td>'+(p.pid||'—')+'</td><td>'+(p.port||'—')+'</td><td>'+(p.uptime||'—')+'</td>'
+        +'<td style="display:flex;gap:4px;padding:6px 14px">'
+        +'<button class="btn btn-sm btn-g" onclick="pact(\'start\',\''+esc(p.name)+'\')">▶</button>'
+        +'<button class="btn btn-sm btn-r" onclick="pact(\'stop\',\''+esc(p.name)+'\')">■</button>'
+        +'<button class="btn btn-sm" onclick="pact(\'restart\',\''+esc(p.name)+'\')">↺</button>'
+        +'</td></tr>';
+    }).join(''):'<tr><td colspan="6" style="color:var(--m);text-align:center">Nenhum processo gerenciado</td></tr>';
+  });
+}
+function pact(action,name){api('process/'+action,'POST',{name:name}).then(function(r){if(r.ok){toast(name+' → '+action);setTimeout(loadProcesses,700);}});}
+function autoDetect(){api('process/autodetect','POST').then(function(r){r.json().then(function(d){toast('Detectados: '+(d.detected||[]).join(', ')||'nenhum');setTimeout(loadProcesses,700);});});}
+
+// ── DNS/Hosts ──
+function loadHosts(){
+  apiGet('hosts/list').then(function(r){return r.json()}).then(function(d){
+    var t=document.getElementById('hosts-body');
+    t.innerHTML=(d&&d.length)?d.map(function(h){
+      return '<tr><td>'+esc(h.domain)+'</td><td>'+esc(h.ip)+'</td>'
+        +'<td><button class="btn btn-r btn-sm" onclick="delHost(\''+esc(h.domain)+'\')">Remover</button></td></tr>';
+    }).join(''):'<tr><td colspan="3" style="color:var(--m);text-align:center">Nenhuma entrada</td></tr>';
+  });
+}
+function addHost(){
+  var domain=document.getElementById('h-domain').value;
+  var ip=document.getElementById('h-ip').value||'127.0.0.1';
+  if(!domain)return;
+  api('hosts/add','POST',{domain:domain,ip:ip}).then(function(r){if(r.ok){toast('Entrada adicionada');loadHosts();}else{r.text().then(function(t){toast(t,'err')});}});
+}
+function delHost(d){api('hosts/delete','POST',{domain:d}).then(function(r){if(r.ok){toast('Removido');loadHosts();}});}
+
+// ── Módulos ──
+var modulesDef = [
+  {key:'gzip',label:'Gzip',desc:'Compressão Gzip'},
+  {key:'brotli',label:'Brotli',desc:'Compressão Brotli'},
+  {key:'spa',label:'SPA Fallback',desc:'Single Page App'},
+  {key:'fastcgi/php',label:'FastCGI/PHP',desc:'Suporte PHP-FPM'},
+  {key:'rate_limit',label:'Rate Limit',desc:'Limite de requisições'},
+  {key:'etag',label:'ETag',desc:'Cache condicional'},
+  {key:'cache',label:'Cache Mode',desc:'Headers de cache'},
+  {key:'métricas',label:'Métricas',desc:'Prometheus /metrics'},
+  {key:'https',label:'HTTPS',desc:'TLS auto-assinado'},
+  {key:'dns_local',label:'DNS Local',desc:'Servidor DNS embutido'},
+];
+function loadModules(){
+  apiGet('config').then(function(r){return r.json()}).then(function(cfg){
+    var stateMap = {
+      'gzip':cfg.gzip_enabled,'brotli':cfg.brotli_enabled,'spa':cfg.spa_fallback_enabled,
+      'fastcgi/php':cfg.fastcgi&&cfg.fastcgi.enabled,'rate_limit':cfg.rate_limit&&cfg.rate_limit.enabled,
+      'etag':cfg.etag_enabled,'cache':cfg.cache_mode_enabled,'métricas':cfg.metrics_enabled,
+      'https':cfg.https_enabled,'dns_local':cfg.dns&&cfg.dns.enabled
+    };
+    var g=document.getElementById('toggle-grid');
+    g.innerHTML=modulesDef.map(function(m){
+      var on=!!stateMap[m.key];
+      return '<div class="toggle-pill'+(on?' on':'')+ '" onclick="toggleMod(\''+m.key+'\','+(on?'false':'true')+',this)" id="tgl-'+m.key.replace('/','_')+'">'
+        +'<div class="switch"></div><div><div class="tname">'+m.label+'</div><div style="font-size:10px;color:var(--m)">'+m.desc+'</div></div></div>';
+    }).join('');
+  });
+}
+function toggleMod(key,val,el){
+  api('set','POST',{module:key,value:val==='true'||val===true}).then(function(r){
+    if(r.ok){
+      var on=val==='true'||val===true;
+      el.className='toggle-pill'+(on?' on':'');
+      el.setAttribute('onclick','toggleMod(\''+key+'\','+(on?'false':'true')+',this)');
+      toast(key+' → '+(on?'ON':'OFF'));
+    }
+  });
+}
+
+// ── Config Editor ──
+function saveConfig(){
+  var text=document.getElementById('cfg-editor').value;
+  try{JSON.parse(text)}catch(e){toast('JSON inválido: '+e.message,'err');return;}
+  api('config/save','POST',JSON.parse(text)).then(function(r){
+    if(r.ok){toast('config.json salvo com sucesso');}else{r.text().then(function(t){toast(t,'err')});}
+  });
+}
 </script>
 </body>
-</html>`
+</html>`))
+}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(html))
+// fmtBytes formata bytes para string legível
+func fmtBytes(b int64) string {
+	if b < 1024 {
+		return fmt.Sprintf("%dB", b)
+	}
+	if b < 1024*1024 {
+		return fmt.Sprintf("%.1fKB", float64(b)/1024)
+	}
+	return fmt.Sprintf("%.1fMB", float64(b)/1024/1024)
+}
+
+// logoutHandler invalida a sessão do painel
+func logoutHandler(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie(sessionCookieName); err == nil {
+		panelSessionsMu.Lock()
+		delete(panelSessions, c.Value)
+		panelSessionsMu.Unlock()
+	}
+	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, MaxAge: -1, Path: "/___brhttp"})
+	http.Redirect(w, r, "/___brhttp/login", 302)
+}
+
+// logsDownloadHandler serve o arquivo de log para download
+func logsDownloadHandler(w http.ResponseWriter, r *http.Request) {
+	currentCfgMu.RLock()
+	cfg := currentCfg
+	currentCfgMu.RUnlock()
+	if cfg.DashboardPassword != "" && !isValidSession(r) {
+		http.Error(w, "unauthorized", 401)
+		return
+	}
+	logPath := cfg.LogFilePath
+	if logPath == "" {
+		logPath = "server.log"
+	}
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		// Exportar buffer em memória
+		logBufferMu.Lock()
+		data := strings.Join(logBuffer, "\n")
+		logBufferMu.Unlock()
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"brhttp.log\"")
+		w.Write([]byte(data))
+		return
+	}
+	w.Header().Set("Content-Disposition", "attachment; filename=\"server.log\"")
+	http.ServeFile(w, r, logPath)
 }
 
 // ─── Middlewares ──────────────────────────────────────────────────────────────
@@ -1911,6 +2506,7 @@ func main() {
 
 	go handleMessages()
 	go watchFiles(cfg)
+	go startMetricsHistory()
 
 	// ── Roteador ─────────────────────────────────────────────────────────────────
 	mux := http.NewServeMux()
@@ -1920,6 +2516,15 @@ func main() {
 		mux.HandleFunc("/___brhttp", dashboardHandler)
 		mux.HandleFunc("/___brhttp/", dashboardHandler)
 		mux.HandleFunc("/___brhttp/metrics-json", metricsJSONHandler)
+		mux.HandleFunc("/___brhttp/login", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "POST" {
+				loginActionHandler(w, r)
+			} else {
+				loginPageHandler(w, r)
+			}
+		})
+		mux.HandleFunc("/___brhttp/logout", logoutHandler)
+		mux.HandleFunc("/___brhttp/logs/download", logsDownloadHandler)
 	}
 	if cfg.MetricsEnabled {
 		mux.HandleFunc("/metrics", metricsHandler)
@@ -1998,6 +2603,11 @@ func main() {
 		}
 		currentCfgMu.Unlock()
 		logLine(fmt.Sprintf("Módulo '%s' → %v", req.Module, req.Value))
+		// Persiste no disco
+		currentCfgMu.RLock()
+		cfgSnap := currentCfg
+		currentCfgMu.RUnlock()
+		saveConfig(cfgSnap)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"ok":true}`))
 	})
@@ -2056,13 +2666,16 @@ func main() {
 	// NOVO: adicionar proxy rule dinamicamente
 	apiMux.HandleFunc("/api/config/proxy/add", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Path   string `json:"path"`
-			Target string `json:"target"`
+			Path             string `json:"path"`
+			Target           string `json:"target"`
+			WebSocketEnabled bool   `json:"websocket_enabled"`
 		}
 		json.NewDecoder(r.Body).Decode(&req)
 		currentCfgMu.Lock()
-		currentCfg.ProxyRules = append(currentCfg.ProxyRules, ProxyRule{Path: req.Path, Target: req.Target})
+		currentCfg.ProxyRules = append(currentCfg.ProxyRules, ProxyRule{Path: req.Path, Target: req.Target, WebSocketEnabled: req.WebSocketEnabled})
+		cfgSnap := currentCfg
 		currentCfgMu.Unlock()
+		saveConfig(cfgSnap)
 		logLine(fmt.Sprintf("Proxy adicionado: %s → %s", req.Path, req.Target))
 		w.Write([]byte(`{"ok":true}`))
 	})
@@ -2076,7 +2689,9 @@ func main() {
 			if p.Path != req.Path { filtered = append(filtered, p) }
 		}
 		currentCfg.ProxyRules = filtered
+		cfgSnap := currentCfg
 		currentCfgMu.Unlock()
+		saveConfig(cfgSnap)
 		logLine("Proxy removido: " + req.Path)
 		w.Write([]byte(`{"ok":true}`))
 	})
@@ -2128,6 +2743,246 @@ func main() {
 			if err := cmd.Run(); err != nil { logLine("Cmd erro: " + err.Error()) }
 		}()
 		w.Write([]byte(`{"ok":true}`))
+	})
+
+	// ── GET /api/config — retorna config completo ────────────────────────────────
+	apiMux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" { http.Error(w, "405", 405); return }
+		currentCfgMu.RLock()
+		liveCfg := currentCfg
+		currentCfgMu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(liveCfg)
+	})
+
+	// ── POST /api/config/save — salva JSON no disco ──────────────────────────────
+	apiMux.HandleFunc("/api/config/save", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" { http.Error(w, "405", 405); return }
+		var newCfg Config
+		if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
+			http.Error(w, `{"error":"json inválido: `+err.Error()+`"}`, 400)
+			return
+		}
+		currentCfgMu.RLock()
+		newCfg.ConfigFilePath = currentCfg.ConfigFilePath
+		currentCfgMu.RUnlock()
+		if err := saveConfig(newCfg); err != nil {
+			http.Error(w, `{"error":"`+err.Error()+`"}`, 500)
+			return
+		}
+		currentCfgMu.Lock()
+		currentCfg = newCfg
+		currentCfgMu.Unlock()
+		logLine("Config salvo via painel")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	})
+
+	// ── Virtual Hosts CRUD ───────────────────────────────────────────────────────
+	apiMux.HandleFunc("/api/virtual-hosts/list", func(w http.ResponseWriter, r *http.Request) {
+		currentCfgMu.RLock()
+		vhosts := currentCfg.VirtualHosts
+		currentCfgMu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		if vhosts == nil { vhosts = []VirtualHost{} }
+		json.NewEncoder(w).Encode(vhosts)
+	})
+
+	apiMux.HandleFunc("/api/virtual-hosts/add", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" { http.Error(w, "405", 405); return }
+		var vh VirtualHost
+		if err := json.NewDecoder(r.Body).Decode(&vh); err != nil || vh.Host == "" {
+			http.Error(w, `{"error":"host obrigatório"}`, 400)
+			return
+		}
+		currentCfgMu.Lock()
+		currentCfg.VirtualHosts = append(currentCfg.VirtualHosts, vh)
+		cfgSnap := currentCfg
+		currentCfgMu.Unlock()
+		saveConfig(cfgSnap)
+		logLine(fmt.Sprintf("Virtual host adicionado: %s → %s", vh.Host, vh.ServeDir))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	})
+
+	apiMux.HandleFunc("/api/virtual-hosts/delete", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" { http.Error(w, "405", 405); return }
+		var req struct{ Host string `json:"host"` }
+		json.NewDecoder(r.Body).Decode(&req)
+		currentCfgMu.Lock()
+		var filtered []VirtualHost
+		for _, v := range currentCfg.VirtualHosts {
+			if v.Host != req.Host { filtered = append(filtered, v) }
+		}
+		currentCfg.VirtualHosts = filtered
+		cfgSnap := currentCfg
+		currentCfgMu.Unlock()
+		saveConfig(cfgSnap)
+		logLine("Virtual host removido: " + req.Host)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	})
+
+	// ── Redirects CRUD ───────────────────────────────────────────────────────────
+	apiMux.HandleFunc("/api/redirects/list", func(w http.ResponseWriter, r *http.Request) {
+		currentCfgMu.RLock()
+		items := currentCfg.Redirects
+		currentCfgMu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		if items == nil { items = []RedirectRule{} }
+		json.NewEncoder(w).Encode(items)
+	})
+
+	apiMux.HandleFunc("/api/redirects/add", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" { http.Error(w, "405", 405); return }
+		var rule RedirectRule
+		json.NewDecoder(r.Body).Decode(&rule)
+		if rule.From == "" || rule.To == "" { http.Error(w, `{"error":"from/to obrigatórios"}`, 400); return }
+		if rule.Code == 0 { rule.Code = 302 }
+		currentCfgMu.Lock()
+		currentCfg.Redirects = append(currentCfg.Redirects, rule)
+		cfgSnap := currentCfg
+		currentCfgMu.Unlock()
+		saveConfig(cfgSnap)
+		logLine(fmt.Sprintf("Redirect adicionado: %s → %s (%d)", rule.From, rule.To, rule.Code))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	})
+
+	apiMux.HandleFunc("/api/redirects/delete", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" { http.Error(w, "405", 405); return }
+		var req struct{ From string `json:"from"` }
+		json.NewDecoder(r.Body).Decode(&req)
+		currentCfgMu.Lock()
+		var filtered []RedirectRule
+		for _, v := range currentCfg.Redirects {
+			if v.From != req.From { filtered = append(filtered, v) }
+		}
+		currentCfg.Redirects = filtered
+		cfgSnap := currentCfg
+		currentCfgMu.Unlock()
+		saveConfig(cfgSnap)
+		logLine("Redirect removido: " + req.From)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	})
+
+	// ── Rewrites CRUD ────────────────────────────────────────────────────────────
+	apiMux.HandleFunc("/api/rewrites/list", func(w http.ResponseWriter, r *http.Request) {
+		currentCfgMu.RLock()
+		items := currentCfg.Rewrites
+		currentCfgMu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		if items == nil { items = []RewriteRule{} }
+		json.NewEncoder(w).Encode(items)
+	})
+
+	apiMux.HandleFunc("/api/rewrites/add", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" { http.Error(w, "405", 405); return }
+		var rule RewriteRule
+		json.NewDecoder(r.Body).Decode(&rule)
+		if rule.From == "" || rule.To == "" { http.Error(w, `{"error":"from/to obrigatórios"}`, 400); return }
+		currentCfgMu.Lock()
+		currentCfg.Rewrites = append(currentCfg.Rewrites, rule)
+		cfgSnap := currentCfg
+		currentCfgMu.Unlock()
+		saveConfig(cfgSnap)
+		logLine(fmt.Sprintf("Rewrite adicionado: %s → %s", rule.From, rule.To))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	})
+
+	apiMux.HandleFunc("/api/rewrites/delete", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" { http.Error(w, "405", 405); return }
+		var req struct{ From string `json:"from"` }
+		json.NewDecoder(r.Body).Decode(&req)
+		currentCfgMu.Lock()
+		var filtered []RewriteRule
+		for _, v := range currentCfg.Rewrites {
+			if v.From != req.From { filtered = append(filtered, v) }
+		}
+		currentCfg.Rewrites = filtered
+		cfgSnap := currentCfg
+		currentCfgMu.Unlock()
+		saveConfig(cfgSnap)
+		logLine("Rewrite removido: " + req.From)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	})
+
+	// ── Mock Routes CRUD ─────────────────────────────────────────────────────────
+	apiMux.HandleFunc("/api/mock-routes/list", func(w http.ResponseWriter, r *http.Request) {
+		currentCfgMu.RLock()
+		items := currentCfg.MockRoutes
+		currentCfgMu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		if items == nil { items = []MockRoute{} }
+		json.NewEncoder(w).Encode(items)
+	})
+
+	apiMux.HandleFunc("/api/mock-routes/add", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" { http.Error(w, "405", 405); return }
+		var route MockRoute
+		json.NewDecoder(r.Body).Decode(&route)
+		if route.Path == "" { http.Error(w, `{"error":"path obrigatório"}`, 400); return }
+		if route.Method == "" { route.Method = "GET" }
+		if route.StatusCode == 0 { route.StatusCode = 200 }
+		currentCfgMu.Lock()
+		currentCfg.MockRoutes = append(currentCfg.MockRoutes, route)
+		cfgSnap := currentCfg
+		currentCfgMu.Unlock()
+		saveConfig(cfgSnap)
+		logLine(fmt.Sprintf("Mock route adicionado: %s %s", route.Method, route.Path))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	})
+
+	apiMux.HandleFunc("/api/mock-routes/delete", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" { http.Error(w, "405", 405); return }
+		var req struct{ Path string `json:"path"` }
+		json.NewDecoder(r.Body).Decode(&req)
+		currentCfgMu.Lock()
+		var filtered []MockRoute
+		for _, v := range currentCfg.MockRoutes {
+			if v.Path != req.Path { filtered = append(filtered, v) }
+		}
+		currentCfg.MockRoutes = filtered
+		cfgSnap := currentCfg
+		currentCfgMu.Unlock()
+		saveConfig(cfgSnap)
+		logLine("Mock route removido: " + req.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	})
+
+	// ── /api/logs/download — download do log ─────────────────────────────────────
+	apiMux.HandleFunc("/api/logs/download", func(w http.ResponseWriter, r *http.Request) {
+		currentCfgMu.RLock()
+		logPath := currentCfg.LogFilePath
+		currentCfgMu.RUnlock()
+		if logPath == "" { logPath = "server.log" }
+		if _, err := os.Stat(logPath); os.IsNotExist(err) {
+			logBufferMu.Lock()
+			data := strings.Join(logBuffer, "\n")
+			logBufferMu.Unlock()
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Content-Disposition", `attachment; filename="brhttp.log"`)
+			w.Write([]byte(data))
+			return
+		}
+		w.Header().Set("Content-Disposition", `attachment; filename="server.log"`)
+		http.ServeFile(w, r, logPath)
+	})
+
+	// ── /api/metrics/history — série temporal de métricas ────────────────────────
+	apiMux.HandleFunc("/api/metrics/history", func(w http.ResponseWriter, r *http.Request) {
+		metricsHistoryMu.Lock()
+		hist := make([]MetricPoint, len(metricsHistory))
+		copy(hist, metricsHistory)
+		metricsHistoryMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if hist == nil { hist = []MetricPoint{} }
+		json.NewEncoder(w).Encode(hist)
 	})
 
 	mux.Handle("/api/", apiAuthMiddleware(cfg.APIToken, apiMux))
