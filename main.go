@@ -1229,6 +1229,10 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	tokenB64 := base64.StdEncoding.EncodeToString([]byte(token))
 	tokenJSON, _ := json.Marshal(tokenB64)
 
+	// Escapar cfgJSON para ser seguro em HTML
+	cfgJSONEscaped := strings.ReplaceAll(string(cfgJSON), `\`, `\\`)
+	cfgJSONEscaped = strings.ReplaceAll(cfgJSONEscaped, "`", "\\`")
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(`<!DOCTYPE html>
 <html lang="pt-BR">
@@ -1814,7 +1818,7 @@ textarea{
         <button class="btn btn-primary" onclick="saveConfig()">Salvar no Disco</button>
       </div>
       <div style="padding:0">
-        <textarea id="cfg-editor" spellcheck="false">` + string(cfgJSON) + `</textarea>
+        <textarea id="cfg-editor" spellcheck="false">` + cfgJSONEscaped + `</textarea>
       </div>
     </div>
   </div>
